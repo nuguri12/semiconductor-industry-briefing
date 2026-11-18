@@ -11,10 +11,10 @@ Only unresolved questions, risks, and follow-up investigations belong here. Remo
 
 ## ISSUE-002 — Confirm news-content processing rights
 
-- **Status:** Open
-- **Question:** Which fields returned by GDELT and NAVER API HUB may be stored, sent to GPT, and included in an internal team digest?
-- **Why it matters:** API access does not automatically authorize article-text reuse or redistribution.
-- **Next action:** Review each provider's terms and limit ingestion to fields permitted for the intended use.
+- **Status:** Blocked for NAVER-to-GPT workflow; open for GDELT-linked publisher content.
+- **Finding (2026-11-18):** NAVER API HUB Search API terms effective 2026-09-20 prohibit inputting search-result data into AI, processing/displaying altered results, and storing or distributing data outside narrow exceptions. GDELT permits use of its datasets with attribution, but that does not establish rights to full publisher articles.
+- **Next action:** Obtain written NAVER permission for the intended internal GPT digest or choose a different Korean source with suitable rights. For GDELT, use metadata/links for discovery and verify publisher permissions before passing article text to GPT.
+- **Sources:** https://www.ncloud.com/support/notice/all/2243 ; https://gdeltproject.org/about.html
 
 ## ISSUE-003 — Define news-query keywords
 
@@ -27,3 +27,10 @@ Only unresolved questions, risks, and follow-up investigations belong here. Remo
 - **Status:** Open
 - **Question:** What morning run time and team destination should the service use?
 - **Next action:** Confirm these before enabling scheduled production delivery.
+
+## ISSUE-005 — Reconcile NAVER API HUB call-limit documentation
+
+- **Status:** Open
+- **Finding (2026-11-18):** The official overview says NAVER Search calls are combined and capped at 775,000 per month, not per day. The official News endpoint guide also says 25,000 calls per day. The service is temporarily free, with advance notice promised before paid conversion. No official source reviewed supports 75,000 free calls per day.
+- **Next action:** Confirm effective daily and monthly limits in the NAVER API HUB console or with NAVER support before sizing production usage.
+- **Sources:** https://guide.ncloud-docs.com/docs/apihub-overview ; https://api.ncloud-docs.com/docs/naver-api-hub-search-news ; https://guide.ncloud-docs.com/docs/apihub-spec
