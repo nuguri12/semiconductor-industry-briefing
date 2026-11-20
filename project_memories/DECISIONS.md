@@ -22,3 +22,9 @@ Record significant accepted choices with date, rationale, and impact. Keep unres
 - **Decision:** Do not set GDELT or NAVER query keywords yet. Ask the user when keyword filtering is about to be implemented.
 - **Rationale:** The user explicitly requested control over the keyword scope.
 - **Impact:** Keep query terms configurable and do not hard-code an assumed list.
+
+## DEC-004 — Minimize routine user intervention (2026-11-20)
+
+- **Decision:** After review of policy, rights, sample output and dry-run results, obtain activation approval once. Apply the approved configuration automatically during normal runs.
+- **Reason and alternative:** Daily manual release would repeat the same review and undermine the morning briefing's purpose.
+- **Impact:** Record configuration changes. Reassess changes to approved scope and surface actionable exceptions. Notification thresholds, recipient and channel remain open.

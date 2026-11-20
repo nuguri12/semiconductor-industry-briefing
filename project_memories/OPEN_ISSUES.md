@@ -27,3 +27,13 @@ Only unresolved questions, risks, and follow-up investigations belong here. Remo
 - **Status:** Open
 - **Question:** What morning run time and team destination should the service use?
 - **Next action:** Confirm these before enabling scheduled production delivery.
+
+## Development dependencies as of 2026-11-20
+
+| Stage | Open question | Resolution |
+|---|---|---|
+| Selection and summary | KST boundaries, unknown timestamps, duplicate grouping, summary format | Developer compares sample outputs. User confirms business rules before enabling them. |
+| State and delivery | GitHub runner access to managed PostgreSQL, budget, retention, logical delivery identity and channel receipts | Developer and operations verify access, cost and recovery semantics before selecting deployment and retry behavior. |
+| Trial and activation | Partial-result policy, cost/time ceilings, observation period, missed-run detection and exception recipients | Agree limits with user and operations. Collect dry-run evidence and review the sample before activation. |
+
+The [briefing plan](../docs/cron-job-plan.md) contains the full decision table, including owners and selection criteria.

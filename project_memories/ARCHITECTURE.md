@@ -4,6 +4,8 @@ The project is in planning; this describes the agreed target flow, not implement
 
 ## Components and Data Flow
 
+The [system design](../docs/system-architecture.md) recommends a Python batch job (HTTPX and OpenAI Python SDK), GitHub Actions, environment secrets and managed PostgreSQL, subject to organizational access and cost. The database holds run and delivery state across workers. A unique delivery record and a lock serve different purposes. An uncertain external send requires reconciliation before retry. A missed scheduled run needs monitoring outside that run.
+
 1. A morning scheduled run starts collection for the overnight window (exact schedule TBD).
 2. Independent GDELT and NAVER API HUB clients retrieve global and Korean news.
 3. Provider responses are normalized to a shared article record: title, publisher, publication time, permitted snippet or text, and original URL.
