@@ -1,5 +1,11 @@
 # Decisions
 
+## DEC-005 — Prefer free infrastructure (2026-11-20)
+
+- User reiterated free-service priority, including DB hosting.
+- Evaluate database, execution, monitoring and backup within free allowances. Obtain approval for paid upgrades.
+- Neon Free remains a conditional recommendation. Compare Supabase Free and Cloudflare D1 with documented limits and operating effort. Measure actual usage before activation. Model API cost remains a separate budget.
+
 Record significant accepted choices with date, rationale, and impact. Keep unresolved questions in `OPEN_ISSUES.md`.
 
 ## DEC-001 — Use GDELT and NAVER API HUB as initial news sources
