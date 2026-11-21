@@ -33,3 +33,9 @@ flowchart TD
 - 기사 전문 수집·저장 여부와 GPT 입력 범위
 
 GPT 요약에는 수집된 정보만 사용하고, 각 항목에 원문 출처와 링크를 유지합니다.
+
+## 이메일 MVP 테스트
+
+fixture 기반 미리보기는 `python -m briefing --input tests/fixtures/articles.json --email-check`로 실행합니다. 발송 검증은 SMTP 자격증명을 환경변수(`SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD`)로 설정하고 `--send --to <주소> --delivery-id <안정된 키>`를 명시해야 합니다. `--delivery-id`는 재실행 때 반드시 같은 값을 사용해야 중복 발송을 억제합니다. SMTP 설정이 아직 없어 실제 발송은 검증하지 않았으며, 사용자 지정 테스트 수신자로 발송하기 전에 G과장이 설정을 확인합니다.
+
+발송 이력은 기본적으로 로컬 `.briefing-deliveries.sqlite3`에 저장되는 테스트용 상태입니다. 이 파일은 분산 worker 간 원자성을 보장하지 않으므로 운영 배포에서는 관리형 PostgreSQL 기반 상태 저장으로 교체해야 합니다. 전송 응답이 불명인 상태는 자동 재전송하지 않습니다.

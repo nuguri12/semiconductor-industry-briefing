@@ -9,7 +9,9 @@ Last checked: 2026-11-20
 - [System architecture](../docs/system-architecture.md) — recommended stack, component diagram, delivery state and failure recovery.
 - [Development plan](../docs/development-plan.md) — engineering workflow, implementation sequence and evidence required at each stage.
 - `project_memories/` — agent-facing state, architecture, decisions, unresolved issues, and this navigation guide.
-- Application code, runtime configuration, tests, and CI have not yet been added.
+- briefing/__main__.py implements collection and normalized message output.
+- tests/test_briefing.py and tests/fixtures/ cover mock responses and synthetic input.
+- docs/collection-test.md provides execution instructions. CI and deployment remain pending.
 
 ## Update This Map When Code Is Added
 

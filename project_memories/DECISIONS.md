@@ -1,5 +1,11 @@
 # Decisions
 
+## DEC-006 — Collection test terms (2026-11-21)
+
+- User specified Infineon, ASE, HYUNDAI and MOBIS for the initial test.
+- Queries remain explicit CLI inputs. Operational scope and ambiguous-name relevance remain open.
+- User requested local message normalization first and GPT integration later.
+
 ## DEC-005 — Prefer free infrastructure (2026-11-20)
 
 - User reiterated free-service priority, including DB hosting.
