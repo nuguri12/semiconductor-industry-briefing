@@ -3,11 +3,27 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from datetime import datetime, timezone, timedelta
 from email.utils import format_datetime
-from briefing.__main__ import collect, normalize, render, retry_delay
+from briefing.__main__ import collect, load_dotenv, normalize, render, retry_delay
 from briefing.email import build_message, validate_message
 
 
 class BriefingTests(unittest.TestCase):
+    def test_load_dotenv_keeps_existing_environment_values(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("MVP_TEST_ENV=new\n# comment\n", encoding="utf-8")
+            with patch.dict(os.environ, {"MVP_TEST_ENV": "existing"}):
+                load_dotenv(env_file)
+                self.assertEqual(os.environ["MVP_TEST_ENV"], "existing")
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("MVP_TEST_ENV", None)
+                load_dotenv(env_file)
+                self.assertEqual(os.environ["MVP_TEST_ENV"], "new")
+                os.environ.pop("MVP_TEST_ENV", None)
+
     def test_email_message_validation_and_no_sender(self):
         result = dict(collected_at="2026-11-21T08:00:00+09:00", query="sample",
                       articles=[dict(title="Test", source="example.com",

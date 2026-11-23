@@ -18,6 +18,19 @@ ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 KST = timezone(timedelta(hours=9))
 
 
+def load_dotenv(path=".env"):
+    try:
+        with open(path, encoding="utf-8") as stream:
+            for line in stream:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+    except FileNotFoundError:
+        pass
+
+
 def retry_delay(value):
     if not value:
         return 5
@@ -117,6 +130,7 @@ def render(result):
 
 
 def main():
+    load_dotenv()
     sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="GDELT 메타데이터 수집 및 정규화")
     source = parser.add_mutually_exclusive_group(required=True)
