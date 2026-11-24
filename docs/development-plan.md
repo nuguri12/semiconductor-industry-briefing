@@ -1,5 +1,7 @@
 # 데일리 브리핑 개발 계획
 
+> **현재 소스 결정(2026-11-24):** 구현은 GDELT DOC API와 과기정통부 보도자료 RSS를 호출한다. GDELT는 기사 본문을 수집하지 않는 글로벌 탐색원이며, RSS는 피드에 명시된 권리표시가 KOGL 제1유형인 항목만 설명문을 사용한다. 산업통상부 RSS는 후보로 문서화했으나 정확한 feed URL을 확인한 뒤 추가한다. DeepSearch는 제외했고 NAVER API는 세부 권한 확인 전 비활성이다. LLM 요약은 아직 구현되지 않았다.
+
 상태: 구현 전 실행 계획. 첫 목표는 합성 기사 한 건으로 팀이 출력 형태·출처·근거를 검토하는 것이다. 업무 요구는 [기획안](cron-job-plan.md), 연결·배포·복구 설계는 [시스템 아키텍처](system-architecture.md), 미결 사항은 [OPEN_ISSUES](../project_memories/OPEN_ISSUES.md)를 따른다. 문서의 경로는 제안이며 코드가 이미 있다고 뜻하지 않는다.
 
 ## 실행 원칙과 의존 관계
@@ -8,12 +10,12 @@
 
 ```mermaid
 flowchart LR
- A[1 오프라인 출력] --> B[2 GDELT 수집·선별]
- B --> C[3 권리 gate 및 요약]
+ A[1 오프라인 출력] --> B[2 GDELT 및 과기정통부 RSS 수집]
+ B --> C[3 항목별 권리 gate 및 요약]
  C --> D[4 PostgreSQL·모의 전달]
  D --> E[5 Actions 예약 dry-run·감시]
  E --> F[6 운영 전환 승인]
- N[NAVER 권리 차단 해결] --> K[한국 소스 연동]
+ N[NAVER 상세 권한 확인 - 보류] --> K[별도 승인 시 검토]
  K -.허용된 입력 추가.-> C
 ```
 
@@ -23,7 +25,7 @@ flowchart LR
 |---|---|---|---|
 | 1. 오프라인 브리핑 | `briefing/models.py`, `briefing/render.py`, `briefing/__main__.py`, `tests/fixtures/` | 없음. 합성 입력만 | 기사 1건과 빈 입력의 출력에 기준 시각·출처·링크가 있고, 네트워크 및 발송 호출 0건. |
 | 2. 글로벌 수집·선별 | `briefing/sources/gdelt.py`, `briefing/select.py` | GDELT metadata 허용 범위 확인; 사용 키워드와 KST 시간 구간은 설정 gate로 두고 값은 TBD | fixture에서 정상/빈/시간초과/잘못된 payload 분리, 시간 경계·누락 시각 검증, 안전한 오류 상태와 다른 소스 결과 보존. |
-| 2a. 한국 소스(차단) | `briefing/sources/naver.py` 또는 승인된 대체 source adapter | NAVER Search 응답을 AI 입력·가공·내부 배포할 서면 허가 또는 적법한 대체 소스 검토/결정. 현재 이 조건 전 NAVER API 실호출 및 결과의 GPT 전달 금지 | 허용 범위 증빙, 쿼터 확인, 데이터 필드와 목적의 명시적 승인 후 mock/fixture 및 제한된 연결 검증. 조건 미충족이면 합성 자료로만 개발 지속. |
+| 2a. RSS 소스 확장 | 현재 `briefing/__main__.py`의 과기정통부 adapter; 후속으로 산업통상부 RSS | 피드 주소 확인, 항목별 권리 표시 확인, 쿼리·시간 범위 | fixture 기반 RSS/Atom parsing, invalid XML·잘못된 URL·날짜·권리표시 검증. 실호출은 별도 확인 후 수행. |
 | 3. 요약·검증·지표 | `briefing/summarize.py`, `briefing/validate.py`, `briefing/market.py` | 기사별 GPT 권리, 모델·비용한도, 지표·제공자 결정 | 틀린 article ID/출처/근거 거부, 허용 필드 fallback, 비용 상한·누락 지표 상태 확인. |
 | 4. DB 상태·모의 전달 | `briefing/state.py`, `briefing/delivery.py`, `migrations/` | GitHub runner→PostgreSQL public/private 네트워크 적합성, 리전·비용·계정, 채널 receipt/idempotency 확인; 논리 브리핑 키와 재발송 정책 승인 | migration/runtime 역할 분리, migration version, 유일 제약, 영속 run claim과 발송 CAS, rollback 확인. 동시 선점 승자는 1개다. sending/sent/unknown 덮어쓰기 및 heartbeat 만료만으로 탈취를 차단한다. mock 전달의 sent/fail/unknown에서 성공 건 재전송 없음. DB 상태 기록 불가 시 발송 0건. |
 | 5. 예약 dry-run | `.github/workflows/briefing.yml`, config validator, `scripts/check_run.py` | repo/plan 및 기본 브랜치, protected environment/secrets, secret 주입, DB 접속, NAVER 제외 또는 권리 gate 통과, 외부 누락 감시 선택 | `schedule`/`workflow_dispatch`/재실행 경로, dry-run 전달 0건, DB 연결·동시성, secret/content 비노출, 예상 실행 누락과 workflow 실패를 외부 monitor에서 탐지. |
@@ -52,7 +54,7 @@ flowchart LR
 
 **기술 선택 전 확인:** GitHub 조직/plan·runner network, DB 공급자/리전/비용/pooled endpoint/TLS 제한/backup, public endpoint 수용 여부, monitor, 모델·예산, 실제 quota 및 운영 접근자.
 
-**업무 정책:** 검색어·관련성, schedule/window 경계와 timestamp 누락, 콘텐츠 권리·보존, NAVER 서면 허가 또는 대체 소스, 시장지표·제공자, 채널·수신자, 부분 결과 정책, 중복·logical delivery identity·수동 재발송 조건, 예외 알림, dry-run 기간·통과 기준, 비용·시간 한도. 설계가 필요한 각 단계에서만 질문하고 답 전에는 해당 실연동·발송을 비활성화한다.
+**업무 정책:** 검색어·관련성, schedule/window 경계와 timestamp 누락, 콘텐츠 권리·보존, NAVER 상세 권한(보류), 시장지표·제공자, 채널·수신자, 부분 결과 정책, 중복·logical delivery identity·수동 재발송 조건, 예외 알림, dry-run 기간·통과 기준, 비용·시간 한도. 설계가 필요한 각 단계에서만 질문하고 답 전에는 해당 실연동·발송을 비활성화한다.
 
 ## 공식 운영 문서
 
@@ -60,5 +62,7 @@ flowchart LR
 - 수동 실행 및 권한: [manual workflow runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 - runner IP 및 네트워크 고려: [GitHub IP addresses](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses)
 - environment secret/protection plan 조건: [deployment environments](https://docs.github.com/en/actions/concepts/workflows-and-actions/deployment-environments), [environment REST API](https://docs.github.com/en/rest/deployments/environments)
-- NAVER 약관 및 quota 상충: [공지](https://www.ncloud.com/support/notice/all/2243), [overview](https://guide.ncloud-docs.com/docs/apihub-overview), [News guide](https://api.ncloud-docs.com/docs/naver-api-hub-search-news), [quota spec](https://guide.ncloud-docs.com/docs/apihub-spec)
+- 과기정통부 [RSS 안내](https://www.msit.go.kr/contents/cont.do?mId=173&mPid=147&sCode=user), [저작권 정책](https://msit.go.kr/contents/cont.do?mId=161&mPid=147&sCode=user)
+- 산업통상부 [보도·참고자료 RSS 게시판](https://www.motir.go.kr/kor/article/ATCL3f49a5a8c), [저작권 정책](https://www.motir.go.kr/kor/contents/81)
+- NAVER API 권한 확인은 추후 별도 작업: [공식 이용약관](https://developers.naver.com/products/intro/terms/terms.md)
 - Neon 기능·리전·요금은 실제 선택 플랜 기준으로 [공식 문서](https://neon.tech/docs/introduction)에서 재확인한다.

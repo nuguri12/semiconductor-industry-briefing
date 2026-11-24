@@ -1,30 +1,23 @@
-# Planned Architecture
+# Architecture
 
-The project is in planning; this describes the agreed target flow, not implemented components.
+## Implemented data flow
 
-## Components and Data Flow
+1. CLI accepts an explicit industry/company query, lookback hours, and per-run result limit.
+2. GDELT DOC API and the Ministry of Science and ICT (MSIT) press-release RSS are requested independently. RSS is read with Python's standard-library XML parser; no API key is needed.
+3. Each response is validated and normalized to title, source/publisher, provider, URL, timestamp, and language. GDELT contributes discovery metadata only. An RSS description is exposed as a summary only when the feed item itself marks KOGL Type 1; otherwise only its title and URL are retained.
+4. Exact URL duplicates are removed. Per-source status is retained; one source failure does not erase the other source's results. Partial results are marked and cannot be sent by the current CLI.
+5. Output is a JSON/text email preview. A local SQLite delivery ledger prevents duplicate sends and avoids automatic retries for unknown outcomes.
 
-The [system design](../docs/system-architecture.md) recommends a Python batch job (HTTPX and OpenAI Python SDK), GitHub Actions, environment secrets and managed PostgreSQL, subject to organizational access and cost. The database holds run and delivery state across workers. A unique delivery record and a lock serve different purposes. An uncertain external send requires reconciliation before retry. A missed scheduled run needs monitoring outside that run.
+## Not implemented
 
-1. A morning scheduled run starts collection for the overnight window (exact schedule TBD).
-2. Independent GDELT and NAVER API HUB clients retrieve global and Korean news.
-3. Provider responses are normalized to a shared article record: title, publisher, publication time, permitted snippet or text, and original URL.
-4. Deterministic processing applies the KST time window, deduplicates records, and filters for industry relevance. Query keywords require user input before implementation.
-5. GPT classifies and summarizes selected records using only supplied, permitted source material.
-6. A Korean digest includes per-item source links and, after a provider is selected, dated FX and index values.
-7. The digest is delivered to a team channel (TBD); run status, source failures, and delivery outcomes are recorded.
+- LLM summarization, market-data collection, CI, scheduling, managed delivery state, and production monitoring.
+- Automatic fallback that hides a source failure. Current behavior is explicit partial collection.
 
-## Boundaries and Reliability
+## Boundaries
 
-- Keep source clients independent and isolate provider-specific parsing from the shared article format.
-- Keep time-window checks, deduplication, and output validation deterministic; GPT is not the authority for source facts.
-- Set request timeouts and retry transient failures only. Distinguish source outages from empty results, and continue processing other sources when one fails.
-- Preserve source links; provide a deterministic fallback if model output is unavailable or invalid.
-- Test with saved response fixtures and mocked clients; CI must not depend on live APIs.
-- Keep credentials in environment variables or repository secrets. Begin scheduled delivery in dry-run mode and prevent overlapping runs before production sends.
-- Check provider terms before storing content, sending it to GPT, or distributing summaries internally.
-- Store explicit time zones; label market values with source and as-of time.
-
-## LLM Approach
-
-Recursive Language Models (RLM) are not needed initially. API queries, deterministic filtering, deduplication, and bounded batches should keep daily inputs manageable. Reconsider only if measured volume or evaluation demonstrates a context-length or cross-document synthesis limitation.
+- GDELT dataset terms do not establish the linked publishers' rights to article text.
+- DeepSearch has been removed from the runtime and source list.
+- GDELT data attribution does not grant rights to linked publisher article text. Never fetch or send those article bodies to an LLM by default.
+- MSIT RSS items require an explicit KOGL Type 1 marker before the feed description can be used. No article body is fetched.
+- NAVER is deferred pending confirmation of search-result display, email delivery, AI, and retention rights.
+- Keep any future API credentials in environment variables or local `.env`; do not print them.

@@ -1,5 +1,11 @@
 # Decisions
 
+## DEC-008 — Use free sources with separate rights boundaries (2026-11-24)
+
+- **Decision:** Use GDELT for global article discovery and MSIT press-release RSS for Korean science/ICT/semiconductor policy. Exclude DeepSearch. Defer NAVER until its exact permissions are confirmed. Keep MOTIR RSS and OpenDART on the candidate list; activate only after endpoint/terms review.
+- **Rationale:** Prioritize no-fee sources whose access and item rights can be checked; do not assume an RSS/API grants article-body or AI-summary rights.
+- **Impact:** GDELT items remain title/link discovery records. RSS descriptions are included only when an item explicitly indicates KOGL Type 1. AI article summarization remains unimplemented.
+
 ## DEC-006 — Collection test terms (2026-11-21)
 
 - User specified Infineon, ASE, HYUNDAI and MOBIS for the initial test.
@@ -19,21 +25,21 @@ Record significant accepted choices with date, rationale, and impact. Keep unres
 - **Date:** 2026-11-18
 - **Decision:** Use GDELT for global news search and NAVER API HUB Search API for Korean news search. Add sources only when a demonstrated coverage need warrants it.
 - **Rationale:** These are the selected starting sources; the design can expand later without committing to a larger source set now.
-- **Impact:** GDELT remains the global discovery candidate. The NAVER API HUB client is on hold for the GPT digest because its current Search API terms conflict with the planned processing; resolve ISSUE-002 before implementation.
+- **Impact:** Superseded by DEC-008. GDELT remains in use; NAVER is deferred until exact permissions for the intended email workflow are verified.
 
 ## DEC-002 — Prioritize no-fee data sources
 
 - **Date:** 2026-11-18
 - **Decision:** Prioritize sources with no access fee for news and market indicators.
 - **Rationale:** Free access is the leading source-selection criterion.
-- **Impact:** NAVER API HUB is temporarily free according to its current guide. Its overview states 775,000 combined Search calls per month, while the News endpoint guide still states 25,000 calls per day. Confirm which limits apply before production; usage rights remain a separate blocker (ISSUE-002).
+- **Impact:** Historical 2026-11-18 price/quota notes are not relied on for the current source selection. Current pricing and limits must be checked from official pages before adopting any API. Usage rights remain a separate gate.
 
 ## DEC-003 — Defer keyword selection until implementation needs it
 
 - **Date:** 2026-11-18
-- **Decision:** Do not set GDELT or NAVER query keywords yet. Ask the user when keyword filtering is about to be implemented.
+- **Decision:** Do not hard-code GDELT or RSS query keywords. Keep each run's query as an explicit CLI input.
 - **Rationale:** The user explicitly requested control over the keyword scope.
-- **Impact:** Keep query terms configurable and do not hard-code an assumed list.
+- **Impact:** Keep query terms configurable and do not hard-code an assumed list. This supersedes the earlier keyword deferral.
 
 ## DEC-004 — Minimize routine user intervention (2026-11-20)
 

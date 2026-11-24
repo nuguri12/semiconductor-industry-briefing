@@ -1,46 +1,50 @@
 # Open Issues
 
-Only unresolved questions, risks, and follow-up investigations belong here. Remove or resolve items when their next action is complete.
-
-## ISSUE-001 — Select free market-indicator sources
+## ISSUE-001 — RSS item rights and summaries
 
 - **Status:** Open
-- **Question:** Which no-fee sources provide the required FX rates and stock indexes under terms suitable for the internal digest?
-- **Why it matters:** Market indicators are part of the requested briefing, but no source has been selected.
-- **Next action:** Confirm required pairs and indexes; compare free API coverage, freshness, attribution, and internal-use restrictions.
+- **Question:** Can the selected feed's descriptions be used in the internal email, and how is each item's KOGL Type 1 marking represented?
+- **Current guard:** The collector uses a feed description only when an explicit KOGL Type 1 / Type 1 marker is present in RSS rights metadata. Otherwise it emits title and link only.
+- **Next action:** Inspect actual MSIT feed items and verify how their rights markers are encoded before enabling summaries.
+- **Source:** https://msit.go.kr/contents/cont.do?mId=161&mPid=147&sCode=user
 
-## ISSUE-002 — Confirm news-content processing rights
-
-- **Status:** Blocked for NAVER-to-GPT workflow; open for GDELT-linked publisher content.
-- **Finding (2026-11-18):** NAVER API HUB Search API terms effective 2026-09-20 prohibit inputting search-result data into AI, processing/displaying altered results, and storing or distributing data outside narrow exceptions. GDELT permits use of its datasets with attribution, but that does not establish rights to full publisher articles.
-- **Next action:** Obtain written NAVER permission for the intended internal GPT digest or choose a different Korean source with suitable rights. For GDELT, use metadata/links for discovery and verify publisher permissions before passing article text to GPT.
-- **Sources:** https://www.ncloud.com/support/notice/all/2243 ; https://gdeltproject.org/about.html
-
-## ISSUE-003 — Define news-query keywords
-
-- **Status:** Deferred until keyword filtering is implemented
-- **Question:** Which companies, technologies, and event types should the GDELT and NAVER queries cover?
-- **Next action:** Ask the user when implementation reaches query configuration. Do not invent a list beforehand.
-
-## ISSUE-004 — Choose schedule and delivery channel
+## ISSUE-002 — GDELT-linked publisher rights
 
 - **Status:** Open
-- **Question:** What morning run time and team destination should the service use?
-- **Next action:** Confirm these before enabling scheduled production delivery.
+- **Question:** What publisher article content, if any, may be sent to an LLM or redistributed?
+- **Finding:** GDELT's dataset license does not confer rights to linked publishers' article text.
+- **Next action:** Keep GDELT use to discovery metadata unless publisher rights are separately confirmed.
+- **Source:** https://gdeltproject.org/about.html
 
-## Development dependencies as of 2026-11-20
+## ISSUE-003 — NAVER API rights
 
-| Stage | Open question | Resolution |
-|---|---|---|
-| Selection and summary | KST boundaries, unknown timestamps, duplicate grouping, summary format | Developer compares sample outputs. User confirms business rules before enabling them. |
-| State and delivery | GitHub runner access to managed PostgreSQL, budget, retention, logical delivery identity and channel receipts | Developer and operations verify access, cost and recovery semantics before selecting deployment and retry behavior. |
-| Trial and activation | Partial-result policy, cost/time ceilings, observation period, missed-run detection and exception recipients | Agree limits with user and operations. Collect dry-run evidence and review the sample before activation. |
+- **Status:** Deferred by user
+- **Question:** What are the exact permissions for displaying unmodified NAVER search results in an internal email, and what storage limits apply?
+- **Next action:** Recheck current official terms and ask NAVER for written permission if the intended email workflow is not expressly covered. Do not call the API before then.
+- **Source:** https://developers.naver.com/products/intro/terms/terms.md
 
-The [briefing plan](../docs/cron-job-plan.md) contains the full decision table, including owners and selection criteria.
-
-## ISSUE-005 — Reconcile NAVER API HUB call-limit documentation
+## ISSUE-004 — MOTIR RSS endpoint
 
 - **Status:** Open
-- **Finding (2026-11-18):** The official overview says NAVER Search calls are combined and capped at 775,000 per month, not per day. The official News endpoint guide also says 25,000 calls per day. The service is temporarily free, with advance notice promised before paid conversion. No official source reviewed supports 75,000 free calls per day.
-- **Next action:** Confirm effective daily and monthly limits in the NAVER API HUB console or with NAVER support before sizing production usage.
-- **Sources:** https://guide.ncloud-docs.com/docs/apihub-overview ; https://api.ncloud-docs.com/docs/naver-api-hub-search-news ; https://guide.ncloud-docs.com/docs/apihub-spec
+- **Question:** What exact URL does the official Ministry of Trade, Industry and Resources RSS button serve?
+- **Finding:** Its press-release board states KOGL Type 1; feed endpoint was not recovered during this change.
+- **Next action:** Verify the exact RSS endpoint and test a fixture/live feed separately before enabling it.
+- **Source:** https://www.motir.go.kr/kor/article/ATCL3f49a5a8c
+
+## ISSUE-005 — Briefing content and delivery approval
+
+- **Status:** Open
+- **Question:** Is the email structure approved, and what recipient(s) and schedule should be used?
+- **Next action:** Review `docs/email-template.md`; confirm recipient and send time before scheduled delivery.
+
+## ISSUE-006 — Industry coverage quality
+
+- **Status:** Open
+- **Question:** Do GDELT and MSIT cover the desired semiconductor and automation-equipment topics with acceptable relevance and freshness?
+- **Next action:** Run an authorized live sample and review relevance, duplicates, feed limits, and timestamps.
+
+## ISSUE-007 — Market indicators
+
+- **Status:** Open
+- **Question:** Which FX rates and stock indexes should be included, and from which permitted sources?
+- **Next action:** Confirm the instruments, then compare free APIs and their terms.

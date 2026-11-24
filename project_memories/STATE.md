@@ -1,28 +1,30 @@
 # Project State
 
-Last updated: 2026-11-21
+Last updated: 2026-11-24
 
 ## Objective
 
-Build a daily morning briefing of overnight global news affecting the semiconductor and automation-equipment industries. Include relevant market indicators such as foreign-exchange rates and stock indexes, then deliver the briefing to the team.
+Build a daily briefing of semiconductor and automation-equipment industry news, then deliver it to the team after content rights, quality, schedule, and recipients are confirmed.
 
 ## Current Status
 
-- Python collection, normalization and local SMTP delivery prototype are implemented in briefing/. Mock SMTP tests cover success, rejection, unknown results and duplicate suppression. Actual SMTP sender configuration and inbox receipt verification are pending. Recipient for the user-authorized test is nuguri12@gmail.com. GPT, CI and production deployment remain pending.
-- G1 documented the Korean workflow, data contracts, team benefit hypotheses and operating policies. G2 defined a conditional MVP stack and delivery recovery design. Benefits and operating costs have not been measured.
-- Initial news sources: GDELT for global coverage and NAVER API HUB Search API for Korean coverage. More sources may be added when a demonstrated coverage gap warrants it.
-- Prefer no-fee sources. NAVER API HUB is temporarily free as of 2026-11-18; its overview states a combined NAVER Search limit of 775,000 calls per month, while its News endpoint guide still says 25,000 calls per day. The user-reported 75,000 free calls per day is not supported by the official pages reviewed. Resolve the documentation conflict with NAVER before relying on the limit.
-- User-selected initial test keywords: Infineon, ASE, HYUNDAI, MOBIS. Query relevance still requires live evaluation; the last GDELT attempt returned HTTP 429.
-- A free market-indicator source, schedule, delivery channel, and permitted content-processing scope remain undecided.
-- Source review (2026-11-18): GDELT DOC 2.0 is suitable as a global discovery feed, subject to article-publisher rights and a live quality test. NAVER API HUB News Search is technically suitable for Korean discovery, but its Search API terms prohibit feeding results to AI and exposing processed results. Do not connect it to the planned GPT digest without written permission or a compliant redesign.
+- `briefing/` collects GDELT DOC API metadata and MSIT press-release RSS independently, normalizes records, removes duplicate URLs, and preserves per-source status. One source failure does not erase the other source's results.
+- DeepSearch was removed from runtime/configuration because the user prefers no-cost sources. NAVER remains deferred pending detailed rights confirmation.
+- GDELT contributes discovery metadata only. RSS descriptions are included only when the item has explicit KOGL Type 1/Type 1 rights metadata; otherwise the record is title/link only. The code does not fetch article bodies or call an LLM.
+- MOTIR press releases are a documented candidate source, but its exact RSS endpoint is not yet wired. OpenDART is listed as a later corporate-disclosure source, not a news feed.
+- AI summarization, market indicators, CI, and scheduled production delivery are not implemented.
+- SMTP preview and local delivery ledger exist. Actual sender configuration and inbox receipt are unverified. Recipient for the user-authorized test remains nuguri12@gmail.com.
+- User prefers no-fee sources. GDELT dataset attribution does not establish publisher article rights. The item-level RSS rights marker still needs validation against actual feed payloads. No RSS feed/API collection run or email send was performed in this change.
+- A proposed email structure is in `docs/email-template.md` and awaits user approval. No external email was sent.
+
+## Validation
+
+- Before this source change, `python -m unittest discover -s tests -v` passed 29 tests on 2026-11-24.
+- Tests were not rerun for this change. `tests/test_sources.py` still refers to DeepSearch and needs updating.
 
 ## Next Actions
 
-1. Review sample messages with [collection instructions](../docs/collection-test.md), then refine query relevance.
-2. Resolve the applicable [open issues](OPEN_ISSUES.md) at each integration boundary.
-3. Measure quality, cost and preparation time in dry-run before activating delivery.
-
-4. Select free FX and index sources after confirming required instruments.
-5. Resolve the NAVER API HUB terms conflict before implementing Korean-news ingestion; verify publisher rights for any article text used with GPT.
-6. Obtain SMTP sender configuration, send one authorized test email to nuguri12@gmail.com, and verify inbox receipt. Local verification on 2026-11-21: 23 unit tests and email preview passed; no actual email was sent.
-7. Confirm schedule and team destination before enabling scheduled delivery.
+1. Update and run source tests for RSS/Atom parsing, explicit rights metadata, dates, duplicates, and independent failure behavior.
+2. Inspect real MSIT RSS items to verify whether KOGL Type 1 appears in feed metadata. Until then, RSS descriptions stay excluded.
+3. Verify the exact MOTIR RSS endpoint and decide whether to add its feed adapter.
+4. Revisit NAVER permissions with the intended email/display flow; obtain email template approval and confirm recipients/schedule before delivery.

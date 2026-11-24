@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import time
 import re
+import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -15,6 +16,7 @@ from .email import add_sender, build_message, send_via_smtp, validate_message
 from .delivery import DeliveryLedger, dispatch
 
 ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
+MSIT_RSS = "https://www.msit.go.kr/user/rss/rss.do?bbsSeqNo=94"
 KST = timezone(timedelta(hours=9))
 
 
@@ -107,24 +109,132 @@ def normalize(payload):
         except (ValueError, TypeError):
             pass
         articles.append(dict(title=title, url=url, source=parsed.hostname,
-                             observed_at=observed, published_at=None,
+                             provider="GDELT", observed_at=observed, published_at=None,
                              language=clean(row.get("language")) or None))
     return articles, rejected
+
+
+def collect_msit_rss(query, hours, limit, now=None):
+    request = Request(MSIT_RSS, headers={"User-Agent": "semiconductor-industry-briefing/0.1"})
+    with urlopen(request, timeout=30) as response:
+        body = response.read(2_000_001)
+    if len(body) > 2_000_000:
+        raise ValueError("MSIT RSS response exceeds 2 MB")
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError as error:
+        raise ValueError("MSIT RSS returned invalid XML") from error
+
+    now = now or datetime.now(KST)
+    cutoff = now - timedelta(hours=hours)
+    terms = [term.strip(" ()\"'") for term in re.split(r"\s+OR\s+", query, flags=re.I)]
+    terms = [term for term in terms if term]
+    atom = "{http://www.w3.org/2005/Atom}"
+    entries = root.findall(".//item") or root.findall(f".//{atom}entry")
+    articles, rejected = [], 0
+    for row in entries:
+        title = clean(row.findtext("title") or row.findtext(f"{atom}title"))
+        description = (row.findtext("description") or row.findtext(f"{atom}summary")
+                       or row.findtext(f"{atom}content") or "")
+        description = clean(re.sub(r"<[^>]+>", " ", description))[:500]
+        rights = (row.findtext("rights") or
+                  row.findtext("{http://purl.org/dc/elements/1.1/}rights") or "")
+        licensed = bool(re.search(r"(?:공공누리|KOGL).{0,20}(?:제?1유형|type\s*1)", rights, re.I))
+        author = (row.findtext("author") or
+                  row.findtext("{http://purl.org/dc/elements/1.1/}creator") or "")
+        url = row.findtext("link") or ""
+        if not url:
+            atom_link = row.find(f"{atom}link")
+            url = atom_link.get("href", "") if atom_link is not None else ""
+        try:
+            parsed = urlsplit(url) if isinstance(url, str) else None
+            valid = (parsed and parsed.scheme in ("https", "http") and parsed.hostname
+                     and parsed.port != 0 and parsed.username is None and "\\" not in url
+                     and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in url))
+        except ValueError:
+            valid = False
+        if not title or not valid:
+            rejected += 1
+            continue
+        date_value = (row.findtext("pubDate") or row.findtext(f"{atom}published")
+                      or row.findtext(f"{atom}updated") or "")
+        try:
+            try:
+                published = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
+            except ValueError:
+                published = parsedate_to_datetime(date_value)
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=KST)
+            published = published.astimezone(KST)
+        except (TypeError, ValueError):
+            rejected += 1
+            continue
+        if not cutoff <= published <= now:
+            continue
+        haystack = f"{title} {description if licensed else ''}".casefold()
+        if terms and not any(term.casefold() in haystack for term in terms):
+            continue
+        articles.append(dict(title=title, url=url, source="과학기술정보통신부",
+                             provider="MSIT RSS", summary=description if licensed else None,
+                             author=clean(author) or None, license="KOGL-1" if licensed else None,
+                             observed_at=None, published_at=published.isoformat(), language="ko"))
+        if len(articles) >= limit:
+            break
+    return articles, rejected
+
+
+def collect_sources(query, hours, limit):
+    sources = {"GDELT": "failed", "MSIT RSS": "failed"}
+    batches, rejected, limit_reached = {}, 0, False
+    try:
+        payload = collect(query, hours, limit)
+        batches["GDELT"], bad = normalize(payload)
+        rejected += bad
+        sources["GDELT"] = "ok"
+        limit_reached |= len(payload["articles"]) >= limit
+    except (OSError, ValueError):
+        batches["GDELT"] = []
+
+    try:
+        batches["MSIT RSS"], bad = collect_msit_rss(query, hours, limit)
+        rejected += bad
+        sources["MSIT RSS"] = "ok"
+    except (OSError, ValueError):
+        batches["MSIT RSS"] = []
+
+    articles, seen = [], set()
+    for provider in ("GDELT", "MSIT RSS"):
+        for article in batches[provider]:
+            if article["url"] in seen:
+                continue
+            seen.add(article["url"])
+            articles.append(article)
+    return dict(articles=articles[:limit], rejected=rejected, sources=sources,
+                limit_reached=limit_reached or len(articles) > limit)
 
 
 def render(result):
     lines = ["뉴스 수집 테스트", f"수집 시각: {result['collected_at']}",
              f"조회: {result['query']}", f"기사 {len(result['articles'])}건 / 제외 {result['rejected']}건",
              "GDELT 관측 시각은 원문 발행 시각과 다를 수 있습니다."]
+    for provider, status in result.get("sources", {}).items():
+        lines.append(f"{provider}: {status}")
     if result["limit_reached"]:
         lines.append("조회 상한에 도달했습니다. 전체 기사 목록이 아닐 수 있습니다.")
     if not result["articles"]:
         lines.append("모든 수집 항목이 검증에서 제외됐습니다." if result["rejected"]
                      else "표시할 기사가 없습니다.")
     for index, article in enumerate(result["articles"], 1):
+        published = article.get("published_at")
+        timestamp = published or article.get("observed_at")
+        time_label = "발행 시각" if published else "관측 시각"
         lines.extend(["", f"{index}. {article['title']}",
+                      f"수집 소스: {article.get('provider', 'GDELT')}",
                       f"출처: {article['source']}",
-                      f"관측 시각: {article['observed_at'] or '확인 불가'}",
+                      f"{time_label}: {timestamp or '확인 불가'}",
+                      *([f"요약: {article['summary']}"] if article.get("summary") else []),
+                      *([f"작성자: {article['author']}"] if article.get("author") else []),
+                      *(["이용표시: 공공누리 제1유형"] if article.get("license") == "KOGL-1" else []),
                       f"원문: {article['url']}"])
     return "\n".join(lines) + "\n"
 
@@ -153,17 +263,23 @@ def main():
         if args.input:
             with open(args.input, encoding="utf-8") as stream:
                 payload = json.load(stream)
+            articles, rejected = normalize(payload)
+            sources = {"GDELT fixture": "ok"}
+            limit_reached = len(payload["articles"]) >= args.limit
         else:
             if not args.query.strip():
                 parser.error("검색어를 입력하세요.")
-            payload = collect(args.query, args.hours, args.limit)
-        articles, rejected = normalize(payload)
+            collected = collect_sources(args.query, args.hours, args.limit)
+            articles, rejected = collected["articles"], collected["rejected"]
+            sources, limit_reached = collected["sources"], collected["limit_reached"]
         result = dict(collected_at=datetime.now(KST).isoformat(),
                       query=args.query or "합성/저장 응답",
                       articles=articles, rejected=rejected,
+                      sources=sources,
                       status=("invalid_records" if rejected and not articles else
-                              "partial" if rejected else "ok" if articles else "empty"),
-                      limit_reached=len(payload["articles"]) >= args.limit)
+                              "partial" if rejected or any(s != "ok" for s in sources.values()) else
+                              "ok" if articles else "empty"),
+                      limit_reached=limit_reached)
         sys.stdout.reconfigure(encoding="utf-8")
         output = json.dumps(result, ensure_ascii=False, indent=2) if args.json else render(result)
         if args.email_check:

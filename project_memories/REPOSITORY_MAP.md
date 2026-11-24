@@ -1,26 +1,16 @@
 # Repository Map
 
-Last checked: 2026-11-20
+Last checked: 2026-11-24
 
-## Current Layout
-
-- `README.md` — public-facing project introduction and proposed workflow.
-- [Briefing plan](../docs/cron-job-plan.md) — requirements, workflow diagram, team use cases, acceptance criteria and open policy decisions.
-- [System architecture](../docs/system-architecture.md) — recommended stack, component diagram, delivery state and failure recovery.
-- [Development plan](../docs/development-plan.md) — engineering workflow, implementation sequence and evidence required at each stage.
-- `project_memories/` — agent-facing state, architecture, decisions, unresolved issues, and this navigation guide.
-- briefing/__main__.py implements collection and normalized message output.
-- tests/test_briefing.py and tests/fixtures/ cover mock responses and synthetic input.
-- docs/collection-test.md provides execution instructions. CI and deployment remain pending.
-
-## Update This Map When Code Is Added
-
-Record only stable navigation points that help future development:
-
-- Application entry point and scheduled-job configuration.
-- News and market-data provider clients and shared schemas.
-- GPT prompt/output validation and digest composition.
-- Delivery integrations and runtime configuration/secrets.
-- Unit/integration tests and CI workflows.
-
-Verify paths against the repository before relying on them; do not assume planned modules already exist.
+- `README.md`: current GDELT + MSIT RSS source list, rights boundary, and commands.
+- `briefing/__main__.py`: GDELT/RSS requests, parsing, normalization, URL deduplication, per-source status, CLI and preview.
+- `briefing/email.py`: email validation and STARTTLS SMTP sender.
+- `briefing/delivery.py`: SQLite delivery ledger and no-auto-retry dispatch behavior.
+- `tests/test_briefing.py`: GDELT parsing, normalization, retry behavior, and message validation.
+- `tests/test_sources.py`: source normalization/merge tests. Update for RSS source behavior before relying on it.
+- `tests/test_delivery.py`, `tests/test_cli_send.py`: delivery-state and send-gate behavior.
+- `tests/fixtures/articles.json`: offline synthetic article response.
+- `docs/collection-test.md`: offline and provider test instructions.
+- `docs/email-template.md`: proposed email format awaiting approval.
+- `.env.example`: local configuration example; `.env` is ignored. The current sources need no API key.
+- `docs/system-architecture.md`, `docs/development-plan.md`, `docs/cron-job-plan.md`: broader deployment design; verify planned state against current code.

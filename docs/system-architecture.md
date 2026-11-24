@@ -1,6 +1,6 @@
 # 데일리 브리핑 시스템 아키텍처
 
-상태: 구현 전 상세 설계 권고안. 서비스 계정, 리전, 예산, 약관 승인 또는 자원 생성은 완료되지 않았다. 업무 정책은 아래 TBD를 유지한다. 기준 문서는 [기획안](cron-job-plan.md), [개발 계획](development-plan.md), `project_memories/`다.
+상태: 배포 세부안은 권고안이며 서비스 계정, 리전, 예산 또는 운영 자원은 아직 확정되지 않았다. **현재 구현은 GDELT DOC API와 과기정통부 RSS를 사용하는 로컬 Python MVP**다. DeepSearch는 제거했고 NAVER는 권한 확인까지 보류한다. 기준 문서는 [기획안](cron-job-plan.md), [개발 계획](development-plan.md), `project_memories/`다.
 
 ## 목표와 MVP 경계
 
@@ -37,14 +37,14 @@ flowchart LR
   Op[운영자<br/>repo write 권한] -->|HTTPS 443<br/>workflow_dispatch| GH
   GH -->|runner job| Job[Python batch<br/>ephemeral hosted runner]
   Job -->|HTTPS 443 + provider auth| G[GDELT]
-  Job -->|HTTPS 443 + API key<br/>연동 전 권리 승인 필수| Nv[NAVER API HUB]
+  Job -->|HTTPS 443 + RSS| Msit[과학기술정보통신부 RSS]
   Job -->|HTTPS 443 + API key| AI[OpenAI API<br/>허용 필드만]
   Job -->|HTTPS 443 + API key| Msg[팀 채널 API TBD]
   Job -->|TCP 5432 + TLS<br/>DB credential| DB[(Neon PostgreSQL<br/>리전 TBD / pooled endpoint)]
   GH -. secrets 주입 .-> Job
 ```
 
-**NAVER-to-GPT 차단 조건:** 현 프로젝트 메모에 따르면 NAVER API HUB Search 약관은 결과를 AI에 입력하거나 가공 결과를 노출·저장·배포하는 것을 제한한다. 따라서 한국 뉴스 NAVER 수집 결과는 현재 설계에서 GPT 입력·가공 브리핑·내부 배포에 연결하지 않는다. 실제 연동 선행 조건은 (a) 의도한 내부 GPT 처리·요약·전달을 명시적으로 허용하는 NAVER의 서면 승인/계약, 또는 (b) 그 사용을 허용하는 대체 한국 뉴스 소스와 권리 검토 및 프로젝트 결정 갱신이다. 권리 확인 없이 메타데이터만 GPT에 넘기는 것도 허용된다고 가정하지 않는다. GDELT discovery metadata 사용 허가가 출판사 기사 전문 이용 권리를 자동 부여하지 않으므로, 기사 본문은 별도 권리 확인 전 입력하지 않는다. 현재 권리 차단을 통과하지 못하면 NAVER 연동 작업을 보류하고 합성 입력/GDELT에서 허용된 metadata만으로 개발한다.
+**현재 콘텐츠 권리 경계:** GDELT 결과는 제목·도메인·관측시각·원문 링크를 발견하는 데만 사용하며, 연결된 언론사 기사 본문은 가져오거나 LLM에 보내지 않는다. 과기정통부 RSS 설명은 RSS 항목에 KOGL 제1유형/Type 1 표시가 있는 경우에만 요약 필드로 사용할 수 있다. 공공기관 피드라는 이유만으로 모든 항목을 허가된 것으로 간주하지 않는다. NAVER Search API의 상세 권한은 나중에 확인하며 그 전에는 호출하거나 이메일에 포함하지 않는다.
 
 ## 트리거와 실행 프로토콜
 
@@ -93,8 +93,8 @@ sequenceDiagram
 | 연결 | 출발지 → 목적지 | 프로토콜/포트/TLS | 인증·통제 |
 |---|---|---|---|
 | 트리거 | 운영자 브라우저 → GitHub Actions | HTTPS 443, TLS | GitHub 계정 MFA 및 저장소 write 권한. 운영자 승인군은 조직이 결정한다. |
-| 소스 | ephemeral runner → GDELT/NAVER API | HTTPS 443, TLS | 공급자 요건의 API key/OAuth. NAVER는 위 권리 gate 통과 때만. 응답 크기·timeout·호출 상한을 둔다. |
-| LLM | runner → OpenAI API | HTTPS 443, TLS | OpenAI API key 또는 지원되는 단기 인증. 권리 허용 필드, 최소 입력, 출력 길이 제한. NAVER 결과 전송 금지 상태 유지. |
+| 소스 | ephemeral runner → GDELT DOC API / 과기정통부 RSS | HTTPS 443, TLS | GDELT 공개 endpoint와 공식 RSS. 응답 크기·timeout·호출 상한을 둔다. NAVER는 권한 확인 전 제외. |
+| LLM | runner → OpenAI API | HTTPS 443, TLS | 요약 기능은 미구현. 추후 권리 허용 자료만 최소 입력으로 전송하고 출력 길이를 제한한다. |
 | DB | runner → managed PostgreSQL endpoint | TCP 5432, TLS verify-full | 전용 `app_runtime` 계정, 강한 secret, DB 권한 최소화. 공용 hosted runner라 고정 IP를 가정하지 않는다. |
 | 전달 | runner → 채널 API TBD | HTTPS 443, TLS | 봇/앱 토큰은 승인된 환경 secret. 수신 대상 제한. idempotency/조회 API 지원 확인. |
 | 비밀 주입 | GitHub Environment → runner job | GitHub 내부 secret 제공 | protected environment/branch 조건으로 prod secrets를 제한한다. 수동 workflow 입력에 비밀값을 받지 않는다. |
@@ -140,7 +140,8 @@ GPT 오류/검증 실패에는 허용된 입력으로 결정적 fallback을 시�
 | `DATABASE_URL` | 비밀 | Neon pooled endpoint와 사용자 인증. TLS 검증 포함. runner 전용 secret. |
 | `OPENAI_API_KEY` | 비밀 | 허용된 데이터만 전송하는 단계에서 주입. 권리 조건 미충족 시 해당 API 호출 금지. |
 | `GDELT_*` 인증/endpoint 설정 | 조건별 | GDELT endpoint는 설정, 인증이 필요하면 secret. endpoint/쿼리는 합의 후 고정. |
-| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | 비밀 | 발급은 실연동 권리 gate 이후로 제한. 현재는 주입하지 않고 비활성. |
+| `MSIT_RSS` | 비밀 아님 | 공식 RSS endpoint. 인증키 불필요. |
+| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | 비밀 | 상세 권한 확인 후 별도 승인되기 전까지 발급·주입·호출하지 않음. |
 | `MARKET_DATA_*` | TBD | 지표 공급자 확정 전 정의하지 않음. |
 | `DELIVERY_API_TOKEN`, `DELIVERY_TARGET_ID` | 비밀/민감 | 채널 승인 후 production environment에만 주입. target은 로그 마스킹. |
 | `ALERT_*` | TBD | monitor/예외 수신 경로 승인 뒤 정의. |
@@ -153,7 +154,7 @@ GPT 오류/검증 실패에는 허용된 입력으로 결정적 fallback을 시�
 | 순서 | 실제 제안 경로/산출물 | 선행 조건 | 완료 검증 |
 |---|---|---|---|
 | 1 | `briefing/models.py`, `briefing/render.py`, `briefing/__main__.py`, `tests/fixtures/` — 합성 자료 기반 샘플 | 키워드·외부 권리 불필요 | 한 건 및 빈 입력 출력, 링크/기준 시각 필드, 외부 네트워크 0회·발송 호출 0회 |
-| 2 | `briefing/sources/gdelt.py`, `briefing/sources/naver.py`, `briefing/select.py` | GDELT metadata 사용 조건 확인; NAVER 실연동은 별도 차단조건 충족; 키워드·window 승인 | mock fixture 정상/빈/timeout/잘못된 payload, 경계/누락 시간, 독립 실패 격리, 중복 후보 자동 병합 없음 |
+| 2 | `briefing/__main__.py`의 GDELT 및 RSS adapter | 현재 구현에 반영됨. RSS 설명은 항목 권리표시가 확인된 경우만 허용. NAVER는 보류 | GDELT/RSS 소스 독립 상태, 시간 필터, URL 중복 제거. 향후 별도 adapter 모듈 분리는 필요가 확인될 때 검토 |
 | 3 | `briefing/summarize.py`, `briefing/validate.py`, `briefing/market.py` | 각 필드의 GPT 이용 권리, 모델·예산, 지표 승인 | 잘못된 기사 ID/근거/URL 거부, fallback, 비용 상한, 시장 누락 상태 |
 | 4 | `briefing/state.py`, `briefing/delivery.py`, `migrations/` | PostgreSQL 계정·리전·접속/비용, channel API, logical key 및 partial policy 결정 | DB 통합: concurrent lock, unique conflict, rollback; mock delivery: sent/confirmed fail/unknown 재실행에서 중복 없음 |
 | 5 | `.github/workflows/briefing.yml`, 설정 검증기, `scripts/check_run.py` | GitHub plan/repo, protected environment, secrets, DB public/private 경로, 권리·쿼터 확인 | schedule/manual/dry-run 경로, prod secret 분리, event/commit 고정, 외부 monitor 누락 감지, logs에서 secret/content 미노출 |
@@ -172,7 +173,9 @@ GPT 오류/검증 실패에는 허용된 입력으로 결정적 fallback을 시�
 - GitHub-hosted runner 동적 IP 및 allowlist 주의: [GitHub IP addresses](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses)
 - environment secrets 및 protection availability: [deployment environments](https://docs.github.com/en/actions/concepts/workflows-and-actions/deployment-environments), [environment REST API plan notes](https://docs.github.com/en/rest/deployments/environments)
 - 임시 클라우드 자격 증명 대안: [GitHub OIDC](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-cloud-providers)
-- NAVER 권리 제한과 제한율 충돌: [NAVER 공지](https://www.ncloud.com/support/notice/all/2243), [API HUB overview](https://guide.ncloud-docs.com/docs/apihub-overview), [News API guide](https://api.ncloud-docs.com/docs/naver-api-hub-search-news), [quota spec](https://guide.ncloud-docs.com/docs/apihub-spec)
+- 과기정통부 [RSS 안내](https://www.msit.go.kr/contents/cont.do?mId=173&mPid=147&sCode=user) 및 [저작권 정책](https://msit.go.kr/contents/cont.do?mId=161&mPid=147&sCode=user)
+- 산업통상부 [보도·참고자료 RSS 게시판](https://www.motir.go.kr/kor/article/ATCL3f49a5a8c)과 [저작권 정책](https://www.motir.go.kr/kor/contents/81). 게시판은 KOGL 제1유형을 안내하나 구현용 RSS endpoint는 아직 확인이 필요하다.
+- NAVER 검색 API 권한은 보류 중이며 상세 조건은 [NAVER API 이용약관](https://developers.naver.com/products/intro/terms/terms.md)에서 다시 확인한다.
 - GDELT dataset 및 이용 안내: [GDELT about](https://gdeltproject.org/about.html)
 
 Neon의 현재 가격, 리전, pooled endpoint와 TLS/backup 조건은 실제 project 및 선택 플랜에 종속되므로 계정 생성 단계에서 [Neon 공식 문서](https://neon.tech/docs/introduction)로 확인한다. 이 초안은 특정 Neon 기능·가격이나 고정 리전 지원을 보장하지 않는다.
