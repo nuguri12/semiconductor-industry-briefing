@@ -162,7 +162,10 @@ def collect_msit_rss(query, hours, limit, now=None):
             try:
                 published = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
             except ValueError:
-                published = parsedate_to_datetime(date_value)
+                try:
+                    published = parsedate_to_datetime(date_value)
+                except (TypeError, ValueError):
+                    published = datetime.strptime(date_value, "%Y.%m.%d").replace(tzinfo=KST)
             if published.tzinfo is None:
                 published = published.replace(tzinfo=KST)
             published = published.astimezone(KST)

@@ -8,6 +8,25 @@ from briefing.email import build_message, validate_message
 
 
 class BriefingTests(unittest.TestCase):
+    @patch("briefing.__main__.urlopen")
+    def test_msit_feed_parses_dot_separated_publish_date(self, opener):
+        from briefing.__main__ import KST, collect_msit_rss
+        body = """<rss><channel><item>
+          <title>반도체 산업 소식</title>
+          <link>https://www.msit.go.kr/article/1</link>
+          <pubDate>2026.11.23</pubDate>
+          <rights>공공누리 제1유형</rights>
+          <description>시험 설명</description>
+        </item></channel></rss>""".encode("utf-8")
+        opener.return_value.__enter__.return_value.read.return_value = body
+        now = datetime(2026, 11, 24, 12, tzinfo=KST)
+
+        articles, rejected = collect_msit_rss("반도체", 72, 25, now=now)
+
+        self.assertEqual(rejected, 0)
+        self.assertEqual(len(articles), 1)
+        self.assertEqual(articles[0]["published_at"], "2026-11-23T00:00:00+09:00")
+
     def test_load_dotenv_keeps_existing_environment_values(self):
         import os
         import tempfile

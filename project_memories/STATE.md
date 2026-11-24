@@ -13,18 +13,22 @@ Build a daily briefing of semiconductor and automation-equipment industry news, 
 - GDELT contributes discovery metadata only. RSS descriptions are included only when the item has explicit KOGL Type 1/Type 1 rights metadata; otherwise the record is title/link only. The code does not fetch article bodies or call an LLM.
 - MOTIR press releases are a documented candidate source, but its exact RSS endpoint is not yet wired. OpenDART is listed as a later corporate-disclosure source, not a news feed.
 - AI summarization, market indicators, CI, and scheduled production delivery are not implemented.
-- SMTP preview and local delivery ledger exist. Actual sender configuration and inbox receipt are unverified. Recipient for the user-authorized test remains nuguri12@gmail.com.
-- User prefers no-fee sources. GDELT dataset attribution does not establish publisher article rights. The item-level RSS rights marker still needs validation against actual feed payloads. No RSS feed/API collection run or email send was performed in this change.
+- SMTP preview and local delivery ledger exist. The live MSIT feed responded, but a live query for `(반도체 OR 장비)` over 72 hours returned no matching articles. GDELT returned HTTP 429 after its one retry. Do not send a partial or empty live collection.
+- The MSIT feed uses `YYYY.MM.DD` publication dates. The adapter now parses that date format in addition to ISO/RFC dates. This confirms feed connectivity and parsing, but the sampled query did not find matching semiconductor/equipment items.
+- A user-authorized SMTP test to `nuguri12@gmail.com` did not send: the delivery ledger records the test key as `failed`. Follow-up diagnostics confirmed EHLO and STARTTLS succeed and Gmail advertises LOGIN/PLAIN/XOAUTH2, but `smtplib.login()` is followed by a disconnect with no SMTP reply code. No message was accepted. SMTP host/port/sender settings match Gmail and the approved sender. The connected Gmail MCP profile resolves to the same account, so Gmail API access works independently of this project's password-based SMTP path. The exact server-side rejection reason remains unknown; do not retry the failed delivery key.
+- User prefers no-fee sources. GDELT dataset attribution does not establish publisher article rights. The item-level RSS rights marker still needs validation against actual feed payloads.
 - A proposed email structure is in `docs/email-template.md` and awaits user approval. No external email was sent.
 
 ## Validation
 
-- Before this source change, `python -m unittest discover -s tests -v` passed 29 tests on 2026-11-24.
-- Tests were not rerun for this change. `tests/test_sources.py` still refers to DeepSearch and needs updating.
+- The new MSIT dotted-date regression test failed before the parser change and passed after it.
+- The full suite ran: 25 tests passed; five tests in the pre-existing, untracked `tests/test_sources.py` failed because they still expect the removed DeepSearch adapter/signature.
 
 ## Next Actions
 
-1. Update and run source tests for RSS/Atom parsing, explicit rights metadata, dates, duplicates, and independent failure behavior.
-2. Inspect real MSIT RSS items to verify whether KOGL Type 1 appears in feed metadata. Until then, RSS descriptions stay excluded.
-3. Verify the exact MOTIR RSS endpoint and decide whether to add its feed adapter.
-4. Revisit NAVER permissions with the intended email/display flow; obtain email template approval and confirm recipients/schedule before delivery.
+1. Investigate GDELT HTTP 429 and collect a live sample when the endpoint permits requests.
+2. Replace password-based SMTP authentication with OAuth2/XOAUTH2 or Gmail API, or verify whether an eligible app password is available. SMTP does not produce an interactive 2-Step Verification prompt. Never paste credentials into chat. Use a new delivery ID for a later send attempt.
+3. Update `tests/test_sources.py` to match GDELT + MSIT RSS and rerun the full suite.
+4. Inspect actual MSIT RSS rights metadata before including feed descriptions in email.
+5. Verify the exact MOTIR RSS endpoint and decide whether to add its feed adapter.
+6. Revisit NAVER permissions and confirm briefing content/schedule before routine delivery.
