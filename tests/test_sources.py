@@ -6,6 +6,11 @@ import briefing.__main__ as app
 
 
 class MultiSourceTests(unittest.TestCase):
+    def setUp(self):
+        mock = patch('briefing.__main__.collect_motir_rss', return_value=([], 0))
+        self.motir = mock.start()
+        self.addCleanup(mock.stop)
+
     @patch("briefing.__main__.collect_msit_rss")
     @patch("briefing.__main__.collect")
     def test_limit_preserves_both_sources_after_deduplication(self, gdelt, rss):
@@ -21,7 +26,7 @@ class MultiSourceTests(unittest.TestCase):
         self.assertEqual([a["url"] for a in result["articles"]],
                          ["https://example.test/a", "https://example.test/c"])
         self.assertTrue(result["limit_reached"])
-        self.assertEqual(result["sources"], {"GDELT": "ok", "MSIT RSS": "ok"})
+        self.assertEqual(result["sources"], {"GDELT": "ok", "MSIT RSS": "ok", "MOTIR RSS": "ok"})
 
     @patch("briefing.__main__.collect_msit_rss")
     @patch("briefing.__main__.collect", side_effect=OSError("provider unavailable"))
@@ -29,14 +34,15 @@ class MultiSourceTests(unittest.TestCase):
         rss.return_value = ([{"title": "A", "url": "https://example.test/a"}], 0)
         result = app.collect_sources("Infineon", 24, 2)
         self.assertEqual(len(result["articles"]), 1)
-        self.assertEqual(result["sources"], {"GDELT": "failed", "MSIT RSS": "ok"})
+        self.assertEqual(result["sources"], {"GDELT": "failed", "MSIT RSS": "ok", "MOTIR RSS": "ok"})
 
     @patch("briefing.__main__.collect_msit_rss", side_effect=ValueError("bad XML"))
     @patch("briefing.__main__.collect", side_effect=OSError("provider unavailable"))
     def test_both_failures_remain_visible(self, gdelt, rss):
+        self.motir.side_effect = OSError('unavailable')
         result = app.collect_sources("Infineon", 24, 2)
         self.assertEqual(result["articles"], [])
-        self.assertEqual(result["sources"], {"GDELT": "failed", "MSIT RSS": "failed"})
+        self.assertEqual(result["sources"], {"GDELT": "failed", "MSIT RSS": "failed", "MOTIR RSS": "failed"})
 
     def test_date_only_overlap_without_inventing_midnight(self):
         dates = ["2026.11.25", "2026-11-26", "2026.11.24", "2026.11.27",

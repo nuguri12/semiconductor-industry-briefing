@@ -4,7 +4,7 @@
 
 - **Status:** Open
 - **Question:** Can the selected feed's descriptions be used in the internal email, and how is each item's KOGL Type 1 marking represented?
-- **Current guard:** The collector uses a feed description only when an explicit KOGL Type 1 / Type 1 marker is present in RSS rights metadata. Otherwise it emits title and link only.
+- **Current guard:** The local MVP omits all RSS descriptions, including items with rights markers. Description reuse is a future scope decision.
 - **Next action:** Inspect actual MSIT feed items and verify how their rights markers are encoded before enabling summaries.
 - **Source:** https://msit.go.kr/contents/cont.do?mId=161&mPid=147&sCode=user
 
@@ -22,14 +22,6 @@
 - **Question:** What are the exact permissions for displaying unmodified NAVER search results in an internal email, and what storage limits apply?
 - **Next action:** Recheck current official terms and ask NAVER for written permission if the intended email workflow is not expressly covered. Do not call the API before then.
 - **Source:** https://developers.naver.com/products/intro/terms/terms.md
-
-## ISSUE-004 — MOTIR RSS endpoint
-
-- **Status:** Open
-- **Question:** What exact URL does the official Ministry of Trade, Industry and Resources RSS button serve?
-- **Finding:** Its press-release board states KOGL Type 1; feed endpoint was not recovered during this change.
-- **Next action:** Verify the exact RSS endpoint and test a fixture/live feed separately before enabling it.
-- **Source:** https://www.motir.go.kr/kor/article/ATCL3f49a5a8c
 
 ## ISSUE-005 — Briefing content and delivery approval
 
@@ -53,5 +45,11 @@
 
 - **Status:** Open
 - **Finding:** Two live collection attempts returned HTTP 429 after the adapter's single retry; no GDELT articles were collected.
-- **Impact:** The current send gate blocks partial and empty live results, so a live-source briefing cannot be sent until GDELT responds successfully.
+- **Impact:** Empty results are blocked. Partial collection can be sent with a warning when another source supplies valid articles; GDELT recovery is not a prerequisite for that limited result.
 - **Next action:** Retry a live sample later at a lower request frequency and inspect GDELT response guidance if 429 persists.
+
+## ISSUE-011 — Cloud database integration pending
+
+- **Status:** Open (2026-11-26). User confirmed no Neon project yet.
+- **Impact:** Schema/store/ledger code is prepared, but real migration, TLS, role grants, rollback and concurrent claims are unverified. No scheduled cloud sending.
+- **Next action:** Follow `docs/database-setup.md` with an isolated Neon database. Run the three integration checks and runtime permission checks; then plan SQLite history migration, fixed schedule windows and backup/restore.

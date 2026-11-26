@@ -1,8 +1,75 @@
 # 데일리 브리핑 시스템 아키텍처
 
+> **2026-11-27 최신 선택:** DB는 Supabase Free, 예약은 GitHub Actions schedule부터 검증한다. workflow_dispatch는 수동 실행에 사용한다. 지연·누락 문제가 확인될 경우 Cloudflare Cron으로 트리거를 이전하되 runner 큐 지연은 별도로 진단한다. 아래 Neon 권고는 이전 설계이며 현재 연결·트리거 계약은 [DB 연결 준비](database-setup.md)를 따른다. 클라우드 자원과 트리거는 아직 배포하지 않았다.
+
 > **현재 MVP 우선 적용(2026-11-26):** 현재 실행 구조는 단일 로컬 Python CLI → GDELT·MSIT RSS → 제목·출처·링크·관측 시각/발행일 정규화 → 기존 SMTP 발송이며, SQLite 파일로 발송 ID와 결과를 보존한다. 정상 기사 1건 이상이면 일부 실패 경고와 함께 발송한다. 기사 본문·RSS 설명·GPT는 사용하지 않는다. Gmail 앱 비밀번호의 합성 메일 수신은 확인했다. 아래 Neon·GitHub Actions·외부 감시·복구 설계는 **후속 확장안**이며 지금 구축할 필수 요소가 아니다. Gmail API/OAuth 추가 구현도 필요하지 않다. 현재 동작은 [README](../README.md)와 [실행 안내](collection-test.md)가 우선한다. 임시 클라우드 실행기에 옮길 때는 SQLite 이력의 영속 보존을 먼저 해결해야 한다.
 
 상태: 배포 세부안은 권고안이며 서비스 계정, 리전, 예산 또는 운영 자원은 아직 확정되지 않았다. **현재 구현은 GDELT DOC API와 과기정통부 RSS를 사용하는 로컬 Python MVP**다. DeepSearch는 제거했고 NAVER는 권한 확인까지 보류한다. 기준 문서는 [기획안](cron-job-plan.md), [개발 계획](development-plan.md), `project_memories/`다.
+
+## DB 구축 실행안 — 2026-11-26
+
+상태: 사용자 요청에 따른 세부 설계. 클라우드 프로젝트·DB·계정·스케줄은 아직 생성하지 않았다. 이 절은 아래 기존 권고안의 DB/전달 관련 TBD를 구체화하며 충돌 시 이 절을 우선한다. 로컬 MVP 완료 기준은 변경하지 않는다.
+
+### 공급자와 위치
+
+- 기본안: **Neon Free 관리형 PostgreSQL, AWS Singapore (`aws-ap-southeast-1`)**. 사용자 소유 Neon 계정에 `semiconductor-industry-briefing` 프로젝트, 운영 `production` 브랜치, `briefing` 데이터베이스를 만든다. 운영 데이터가 없는 독립 테스트 브랜치에서 먼저 검증한다. 사용자가 EC2/VM을 관리할 필요는 없다.
+- 한국에서 직접 점검하기 편한 아시아 리전을 선택한 제안이다. GitHub hosted runner와 DB의 최단 거리라고 주장하지 않는다. 생성 전 실제 runner의 TLS 연결·응답 시간을 측정하고 프로젝트 생성 화면의 가용성을 확인한다. 리전 변경은 새 프로젝트로 이관해야 하므로 데이터가 쌓이기 전에 결정한다. [공식 리전](https://neon.com/docs/introduction/regions)
+- 2026-11-26 공식 Free 안내는 프로젝트당 100 CU-hours/월, 1 GB 저장소, 카드 없이 시작 가능이다. 이를 무제한 운영 보장으로 해석하지 않는다. 한도의 70%에서 보존량·쿼리·실행 시간을 검토하며 자동 유료 전환은 하지 않는다. [가격](https://neon.com/pricing)
+- Supabase는 PostgreSQL이므로 대안이 된다. 무료 DB 500 MB 및 낮은 활동량에 따른 일시 정지를 고려해야 한다. IPv4 연결에는 shared pooler를 사용할 수 있다. 이미 쓰는 Supabase 조직이 있다면 이전 비용이 낮은 대안이지만, 현재 프로젝트에서 계정이 준비됐다는 증거는 없다. [가격](https://supabase.com/pricing), [연결](https://supabase.com/docs/guides/database/connecting-to-postgres), [일시 정지](https://supabase.com/docs/guides/platform/free-project-pausing)
+- Cloudflare D1은 SQLite SQL을 사용하는 관리형 DB이며 Worker/HTTP API로 접근할 수 있다. Python에서 사용 불가능한 것은 아니지만 HTTP 인증·상태 저장 코드를 작성해야 한다. 이번 PostgreSQL 계획에서는 선택하지 않는다. 현재 코드에도 psycopg가 구현된 것은 아니며, Neon 선택 시 드라이버 추가가 필요하다. [D1](https://developers.cloudflare.com/d1/)
+
+### 실행 위치와 연결
+
+GitHub Actions의 짧게 실행되는 Python job이 GDELT/MSIT → Neon → Gmail SMTP 순서로 처리한다. DB에는 PostgreSQL TLS 연결, SMTP에는 STARTTLS를 사용한다. DB/SMTP 비밀값은 GitHub Environment secrets에 두고 로그·Git·DB 테이블에 기록하지 않는다.
+
+- 런타임: `DATABASE_URL` pooled endpoint, `sslmode=verify-full`, 연결 timeout 15초. DB 오류 시 SQLite로 자동 전환하지 않고 발송을 차단한다.
+- migration/백업: direct endpoint를 별도 자격 증명으로 사용한다. 런타임 역할에는 DDL/전체 DB 관리 권한을 주지 않는다.
+- 역할: `briefing_migrator`는 전용 스키마 소유 및 migration, `briefing_app`은 필요한 SELECT/INSERT/UPDATE만, 정리·백업은 별도 작업 자격 증명으로 실행한다. `public` 기본 권한을 점검하고 스키마명을 명시한다.
+- Neon pooler는 transaction 모드이므로 세션 advisory lock에 의존하지 않는다. UNIQUE 제약과 조건부 UPDATE를 사용하며 네트워크 요청 중 DB 트랜잭션을 열어두지 않는다. [연결 제한과 direct 용도](https://neon.com/docs/connect/connection-pooling)
+
+### 최소 테이블과 데이터 계약
+
+업무 테이블은 3개이며 migration 버전 관리 테이블은 별도다. ID는 UUID, 시각은 `timestamptz`로 저장하고 표시만 KST로 한다.
+
+| 테이블 | 주요 필드 및 제약 | 역할 |
+|---|---|---|
+| `runs` | `id`, `run_key UNIQUE`, `trigger`, `window_start/end`, `config_hash`, `status`, `source_results JSONB`, `started_at/finished_at`, `error_code` | 한 조회 구간의 실행 소유권과 수집 결과. `run_key`는 구간·검색/설정 버전으로 계산하며 실행 시각 난수를 넣지 않음. |
+| `briefings` | `id`, `run_id UNIQUE REFERENCES runs`, `schema_version`, `payload JSONB`, `content_hash`, `subject`, `body`, `created_at` | 검증된 정규화 결과와 메일 본문을 불변으로 저장. 제목·링크·소스 상태·날짜 정밀도 보존. 원문·RSS 설명·비밀값 제외. |
+| `deliveries` | `id`, `briefing_id REFERENCES briefings` (이관 기록은 NULL 허용), `delivery_key UNIQUE`, `recipient`, `status`, `attempted_at/finished_at`, `error_code`, `message_id`, UNIQUE(`briefing_id`, `recipient`) | 받는 사람별 발송 선점 및 결과. 이관 기록은 기존 delivery key를 그대로 유지. |
+
+상태는 CHECK 제약으로 제한한다. run은 `collecting/ready/empty/failed`, delivery는 `sending/sent/failed/unknown`이다. 실패 원문에는 비밀값이 섞일 수 있으므로 오류 종류·코드만 기록한다. 기사별 테이블, ORM, 큐는 이번 단계에 추가하지 않는다.
+
+### 중복 방지와 재실행
+
+1. 고정 조회 구간·설정으로 `runs` 행을 INSERT하고 충돌 시 기존 상태를 조회한다. 이미 ready인 구간은 새 수집으로 본문을 바꾸지 않고 저장 결과를 재사용한다.
+2. 수집·검증 후 briefing 저장과 run ready 전환을 하나의 트랜잭션으로 커밋한다. 빈 결과는 empty로 기록하고 발송하지 않는다.
+3. dry-run은 briefing까지만 저장하며 deliveries 행과 SMTP 호출을 만들지 않는다. 이는 기존 로컬 dry-run의 무발송 의미를 유지한다.
+4. delivery 행을 `sending`으로 선점·커밋한 실행만 SMTP를 호출한다. 같은 키 충돌 시 sent/failed/unknown/sending 모두 자동 재전송하지 않는다.
+5. SMTP 수락 후 sent로 전환한다. 응답불명은 unknown. SMTP 성공 후 DB 기록 실패는 sending으로 남을 수 있으므로 stale 상태를 자동 해제하지 않고 수신함과 대조한다.
+6. 수집 중 중단된 collecting 행은 운영자가 기존 실행 종료를 확인한 뒤 조건부 상태 갱신으로 재개한다. 발송 중단과 수집 재개를 같은 자동 재시도 규칙으로 취급하지 않는다.
+
+### 트리거와 전환 순서
+
+1. **계정·연결 준비:** 사용자 소유 Neon 프로젝트와 GitHub 저장소 환경을 연결한다. 생성 화면에서 Free 한도·싱가포르 가용성 확인. 관리자 접속 문자열은 채팅 대신 로컬 비밀 설정 또는 GitHub secrets에 저장한다.
+2. **스키마:** `migrations/001_briefing.sql`과 최소 버전 적용 스크립트 작성. 테스트 DB에 적용하고 런타임 역할의 DDL 거부·TLS 검증 확인.
+3. **Python 연결:** psycopg를 버전 고정해 추가하고 `briefing/state.py`에서 저장·선점 기능 구현. 기존 수집·정규화·이메일 렌더러를 그대로 사용하고 delivery 저장 계층만 PostgreSQL에 연결한다.
+4. **통합 검증:** 두 프로세스 동시 실행 시 하나만 선점, 같은 구간 재실행 시 같은 본문, DB 장애 시 발송 0건, SMTP unknown 재시도 0건, 저장 payload 왕복 일치, 복구 후 발송 차단을 확인한다. 모의 SMTP를 우선 사용한다.
+5. **기존 SQLite 이관:** 로컬 실발송을 중지하고 이력을 백업한다. 기존 delivery key·status·message_id를 가져오며 없는 수신자/briefing은 추측하지 않는다. 새 클라우드 메일만 새 키를 사용한다. 건수·키·상태 대조 후 클라우드를 유일한 실발송 경로로 지정한다.
+6. **Actions 수동 dry-run:** `.github/workflows/briefing.yml`을 `workflow_dispatch`로 연결한다. secrets 누락은 시작 전에 실패시키고 전체 실행 timeout 및 concurrency를 둔다. concurrency만 중복 방지 수단으로 사용하지 않는다.
+7. **실제 기사 수동 수신 검증:** 현재 M1 수집 차단이 해소되면 DB에 저장된 동일 briefing으로 수신을 확인한다. 이 단계가 통과해야 예약 실발송으로 넘어간다.
+8. **예약 운영:** 제안 시각은 매일 08:10 KST, 조회 구간은 전일 08:00~당일 08:00 KST다. 아직 확정 일정이 아니며 schedule은 비활성 상태로 준비한다. job 시작이 지연돼도 조회 구간은 고정한다. 현재 GDELT 상대 timespan 방식은 실행 시각에 따라 결과 구간이 달라지므로 예약 활성화 전 절대 구간 조회 계약을 공식 API 문서로 확인·구현한다. RSS 날짜만 있는 항목은 날짜 단위 중첩 가능성을 명시한다.
+
+### 보존·백업·비용
+
+- 초기 제안: 기사 payload·이메일 본문 30일, 수집 상세 상태 90일. 기간 종료 시 payload/subject/body 및 상세 필드를 비우고 FK가 참조하는 ID·내용 해시·중복 방지 키와 최소 상태 행은 서비스 운영 동안 유지한다. 해당 내용 필드는 정리 후 NULL을 허용하며 삭제된 본문을 재발송하지 않는다. 미해결 sending/unknown은 자동 정리하지 않는다. 이 정책은 권리 검토 및 보존 설정 확정 후 활성화한다.
+- 하루 25건 × 1건 2 KB × 30일이면 기사 JSON 약 1.5 MB라는 추정이다. 인덱스·본문·시스템 데이터와 백업은 별도이며 실제 DB 크기/사용량을 측정한다.
+- 무료 서비스의 복구 기능을 영구 백업으로 가정하지 않는다. direct 연결의 `pg_dump`를 매일 암호화해 비공개 GitHub Actions artifact에 7일 보관하는 초기안을 사용한다. 암호화 복구 키는 DB/백업과 분리해 사용자 비밀 저장소에 보관한다. 실제 artifact 비용·보존 한도는 계정에서 확인한다.
+- payload 보존 정책과 맞춰 백업에도 최대 7일의 삭제 지연이 있음을 기록한다. 복구 연습을 먼저 수행하고 목표 RPO 24시간, RTO 1영업일을 측정한다. 목표값이며 현재 보장값이 아니다.
+- DB 복원은 백업 이후 발송 이력을 잃을 수 있다. 복원 직후 SEND_ENABLED를 끄고 받은편지함/발송 증거와 대조하기 전 자동 발송을 재개하지 않는다. 자동 backfill은 하지 않는다.
+
+### 구축에 필요한 사용자 측 정보
+
+Neon 계정/프로젝트의 소유 조직, GitHub 운영 저장소와 secret 설정 권한이 필요하다. 한국 내 데이터 보관 의무가 있으면 싱가포르 기본안을 재검토해야 한다. DB 접속 비밀번호는 채팅으로 받지 않는다. 일정·보존 기간은 위 제안으로 구현 가능한 상태까지 준비한 뒤 운영 활성화 시 확정한다.
 
 ## 목표와 MVP 경계
 

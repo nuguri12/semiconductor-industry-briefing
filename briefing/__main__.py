@@ -18,6 +18,7 @@ from .delivery import DeliveryLedger, dispatch
 
 ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 MSIT_RSS = "https://www.msit.go.kr/user/rss/rss.do?bbsSeqNo=94"
+MOTIR_RSS = "https://www.motir.go.kr/kor/article/ATCL3f49a5a8c/rss"
 KST = timezone(timedelta(hours=9))
 
 
@@ -116,21 +117,32 @@ def normalize(payload):
 
 
 def collect_msit_rss(query, hours, limit, now=None):
-    request = Request(MSIT_RSS, headers={"User-Agent": "semiconductor-industry-briefing/0.1"})
+    return collect_rss(MSIT_RSS, "MSIT RSS", "과학기술정보통신부", query, hours, limit, now)
+
+
+def collect_motir_rss(query, hours, limit, now=None):
+    # The ministry's RSS button submits an empty POST to this endpoint.
+    return collect_rss(MOTIR_RSS, "MOTIR RSS", "산업통상부", query, hours, limit, now, data=b"")
+
+
+def collect_rss(endpoint, provider, publisher, query, hours, limit, now=None, data=None):
+    request = Request(endpoint, data=data, headers={"User-Agent": "semiconductor-industry-briefing/0.1"})
     with urlopen(request, timeout=30) as response:
         body = response.read(2_000_001)
     if len(body) > 2_000_000:
-        raise ValueError("MSIT RSS response exceeds 2 MB")
+        raise ValueError(f"{provider} response exceeds 2 MB")
     try:
         root = ET.fromstring(body)
     except ET.ParseError as error:
-        raise ValueError("MSIT RSS returned invalid XML") from error
+        raise ValueError(f"{provider} returned invalid XML") from error
+    atom = "{http://www.w3.org/2005/Atom}"
+    if root.tag not in ("rss", f"{atom}feed"):
+        raise ValueError(f"{provider} returned an unsupported feed")
 
     now = now or datetime.now(KST)
     cutoff = now - timedelta(hours=hours)
     terms = [term.strip(" ()\"'") for term in re.split(r"\s+OR\s+", query, flags=re.I)]
     terms = [term for term in terms if term]
-    atom = "{http://www.w3.org/2005/Atom}"
     entries = root.findall(".//item") or root.findall(f".//{atom}entry")
     articles, rejected = [], 0
     for row in entries:
@@ -171,8 +183,8 @@ def collect_msit_rss(query, hours, limit, now=None):
         haystack = title.casefold()
         if terms and not any(term.casefold() in haystack for term in terms):
             continue
-        articles.append(dict(title=title, url=url, source="과학기술정보통신부",
-                             provider="MSIT RSS", observed_at=None,
+        articles.append(dict(title=title, url=url, source=publisher,
+                             provider=provider, observed_at=None,
                              published_at=published.date().isoformat() if date_only else published.isoformat(),
                              published_precision="date" if date_only else "datetime", language="ko"))
         if len(articles) >= limit:
@@ -181,29 +193,37 @@ def collect_msit_rss(query, hours, limit, now=None):
 
 
 def collect_sources(query, hours, limit):
-    sources = {"GDELT": "failed", "MSIT RSS": "failed"}
+    sources = {"GDELT": "failed", "MSIT RSS": "failed", "MOTIR RSS": "failed"}
+    source_details = {}
     batches, rejected, limit_reached = {}, 0, False
     try:
         payload = collect(query, hours, limit)
         batches["GDELT"], bad = normalize(payload)
         rejected += bad
         sources["GDELT"] = "ok"
+        source_details["GDELT"] = dict(count=len(batches["GDELT"]), rejected=bad)
         limit_reached |= len(payload["articles"]) >= limit
     except (OSError, ValueError) as error:
         print(f"GDELT: {type(error).__name__} {getattr(error, 'code', '')}", file=sys.stderr)
         batches["GDELT"] = []
+        source_details["GDELT"] = dict(count=0, error=type(error).__name__,
+                                       http_status=getattr(error, "code", None))
 
-    try:
-        batches["MSIT RSS"], bad = collect_msit_rss(query, hours, limit)
-        rejected += bad
-        sources["MSIT RSS"] = "ok"
-        limit_reached |= len(batches["MSIT RSS"]) >= limit
-    except (OSError, ValueError) as error:
-        print(f"MSIT RSS: {type(error).__name__} {getattr(error, 'code', '')}", file=sys.stderr)
-        batches["MSIT RSS"] = []
+    for provider, collector in (("MSIT RSS", collect_msit_rss), ("MOTIR RSS", collect_motir_rss)):
+        try:
+            batches[provider], bad = collector(query, hours, limit)
+            rejected += bad
+            sources[provider] = "ok"
+            source_details[provider] = dict(count=len(batches[provider]), rejected=bad)
+            limit_reached |= len(batches[provider]) >= limit
+        except (OSError, ValueError) as error:
+            print(f"{provider}: {type(error).__name__} {getattr(error, 'code', '')}", file=sys.stderr)
+            batches[provider] = []
+            source_details[provider] = dict(count=0, error=type(error).__name__,
+                                           http_status=getattr(error, "code", None))
 
     seen = set()
-    for provider in ("GDELT", "MSIT RSS"):
+    for provider in sources:
         unique = []
         for article in batches[provider]:
             if article["url"] in seen:
@@ -211,10 +231,67 @@ def collect_sources(query, hours, limit):
             seen.add(article["url"])
             unique.append(article)
         batches[provider] = unique
-    articles = [article for pair in zip_longest(batches["GDELT"], batches["MSIT RSS"])
+    articles = [article for pair in zip_longest(*(batches[p] for p in sources))
                 for article in pair if article is not None]
     return dict(articles=articles[:limit], rejected=rejected, sources=sources,
+                source_details=source_details,
                 limit_reached=limit_reached or len(articles) > limit)
+
+
+def read_snapshot(payload):
+    """Validate saved normalized output without reinterpreting it as GDELT data."""
+    if payload.get("schema_version") != 1:
+        raise ValueError("Unsupported briefing snapshot version")
+    for key in ("collected_at", "query"):
+        if not isinstance(payload.get(key), str) or not payload[key].strip():
+            raise ValueError(f"Invalid snapshot {key}")
+    if datetime.fromisoformat(payload["collected_at"]).tzinfo is None:
+        raise ValueError("Snapshot collection time requires a timezone")
+    if type(payload.get("rejected")) is not int or payload["rejected"] < 0:
+        raise ValueError("Invalid snapshot rejected count")
+    if type(payload.get("limit_reached")) is not bool:
+        raise ValueError("Invalid snapshot limit flag")
+    sources = payload.get("sources")
+    if (not isinstance(sources, dict) or not sources
+            or any(not isinstance(k, str) or not k or k != clean(k)
+                   or v not in ("ok", "failed") for k, v in sources.items())):
+        raise ValueError("Invalid snapshot source states")
+    details = payload.get("source_details", {})
+    if not isinstance(details, dict):
+        raise ValueError("Invalid snapshot source details")
+    for provider, detail in details.items():
+        if (provider not in sources or not isinstance(detail, dict)
+                or type(detail.get("count")) is not int or detail["count"] < 0):
+            raise ValueError("Invalid snapshot source count")
+    rows, bad = normalize(payload)
+    if bad or len({a["url"] for a in rows}) != len(rows):
+        raise ValueError("Invalid or duplicate snapshot articles")
+    for row in payload["articles"]:
+        for key in ("title", "source", "provider"):
+            if not isinstance(row.get(key), str) or not row[key].strip() or row[key] != clean(row[key]):
+                raise ValueError(f"Invalid snapshot article {key}")
+        if row.get("published_precision") not in (None, "date", "datetime"):
+            raise ValueError("Invalid publication date precision")
+        if sources.get(row["provider"]) != "ok":
+            raise ValueError("Article belongs to an unsuccessful source")
+        for key in ("observed_at", "published_at"):
+            value = row.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise ValueError("Invalid article timestamp")
+            stamp = datetime.fromisoformat(value)
+            if key == "published_at" and row.get("published_precision") == "date":
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    raise ValueError("Invalid date-only timestamp")
+            elif stamp.tzinfo is None:
+                raise ValueError("Article timestamp requires a timezone")
+    expected = ("invalid_records" if payload["rejected"] and not rows else
+                "partial" if payload["rejected"] or any(s != "ok" for s in sources.values()) else
+                "ok" if rows else "empty")
+    if payload.get("status") != expected:
+        raise ValueError("Snapshot status conflicts with its records")
+    return payload
 
 
 def render(result):
@@ -222,7 +299,8 @@ def render(result):
              f"조회: {result['query']}", f"기사 {len(result['articles'])}건 / 제외 {result['rejected']}건",
              "GDELT 관측 시각은 원문 발행 시각과 다를 수 있습니다."]
     for provider, status in result.get("sources", {}).items():
-        lines.append(f"{provider}: {status}")
+        count = result.get("source_details", {}).get(provider, {}).get("count")
+        lines.append(f"{provider}: {status}" + (f" (수집 {count}건)" if count is not None else ""))
     if result.get("status") == "partial":
         lines.append("일부 소스 수집 실패 또는 유효하지 않은 항목 제외: 확인된 기사만 포함합니다.")
     if result["limit_reached"]:
@@ -250,7 +328,7 @@ def main():
     parser = argparse.ArgumentParser(description="GDELT 메타데이터 수집 및 정규화")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--query", help='예: (Infineon OR ASE OR HYUNDAI OR MOBIS)')
-    source.add_argument("--input", help="GDELT 형태의 JSON 샘플 경로")
+    source.add_argument("--input", help="저장한 브리핑 JSON 또는 GDELT 샘플 경로")
     parser.add_argument("--hours", type=int, default=24)
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--json", action="store_true", help="정규화 JSON 출력")
@@ -261,19 +339,26 @@ def main():
     parser.add_argument("--delivery-id", help="중복 방지용 안정적인 발송 ID; --send와 함께 필수")
     parser.add_argument("--delivery-db", default=".briefing-deliveries.sqlite3",
                         help="발송 상태 SQLite 파일")
+    parser.add_argument("--store-db", action="store_true",
+                        help="저장한 정규화 JSON을 PostgreSQL에 보존하고 해당 DB로 발송 이력 관리")
     args = parser.parse_args()
+    if args.send and (args.email_check or args.json):
+        parser.error("--send는 --email-check 또는 --json과 함께 사용할 수 없습니다.")
     if not 1 <= args.hours <= 72 or not 1 <= args.limit <= 250:
         parser.error("hours는 1~72, limit는 1~250 범위입니다.")
     try:
+        snapshot = None
         if args.input:
             with open(args.input, encoding="utf-8") as stream:
                 payload = json.load(stream)
+            if isinstance(payload, dict) and any(k in payload for k in ("schema_version", "collected_at", "sources")):
+                snapshot = read_snapshot(payload)
             articles, rejected = normalize(payload)
             unique = {}
             for article in articles:
                 unique.setdefault(article['url'], article)
             articles = list(unique.values())[:args.limit]
-            sources = {"GDELT fixture": "ok"}
+            sources = {"GDELT": "ok"}
             limit_reached = len(payload["articles"]) >= args.limit
         else:
             if not args.query.strip():
@@ -289,6 +374,23 @@ def main():
                               "partial" if rejected or any(s != "ok" for s in sources.values()) else
                               "ok" if articles else "empty"),
                       limit_reached=limit_reached)
+        result["schema_version"] = 1
+        if not args.input:
+            result["source_details"] = collected.get("source_details", {})
+            result["hours"] = args.hours
+        if snapshot is not None:
+            result = snapshot
+        postgres_id = None
+        if args.store_db:
+            if snapshot is None:
+                raise ValueError("--store-db requires a versioned snapshot via --input")
+            from .db import PostgresStore
+            store = PostgresStore(os.environ.get("DATABASE_URL"))
+            message = build_message(result, render(result))
+            postgres_id = store.save(result, str(message['Subject']), render(result))
+            saved, subject, body = store.load(postgres_id)
+            if saved != result or subject != str(message['Subject']) or body != render(result):
+                raise ValueError("Stored briefing differs from the reviewed snapshot")
         sys.stdout.reconfigure(encoding="utf-8")
         output = json.dumps(result, ensure_ascii=False, indent=2) if args.json else render(result)
         if args.email_check:
@@ -323,7 +425,11 @@ def main():
             if errors:
                 print("\n".join(errors), file=sys.stderr)
                 return 2
-            ledger = DeliveryLedger(Path(args.delivery_db))
+            if args.store_db:
+                from .db import PostgresLedger
+                ledger = PostgresLedger(os.environ.get("DATABASE_URL"), postgres_id, args.to)
+            else:
+                ledger = DeliveryLedger(Path(args.delivery_db))
             outcome = dispatch(ledger, args.delivery_id, message,
                                lambda msg: send_via_smtp(msg, host, port, username, password))
             print(f"이메일 발송 상태: {outcome.status}")

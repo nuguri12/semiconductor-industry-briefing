@@ -1,8 +1,11 @@
 # Repository Map
 
-Last checked: 2026-11-24
+Last checked: 2026-11-26
 
-- `README.md`: current GDELT + MSIT RSS source list, rights boundary, and commands.
+- `README.md`: GDELT + MSIT + MOTIR source list, rights boundary and commands.
+- `briefing/db.py`, `migrations/001_briefing.sql`, `requirements.txt`: explicit PostgreSQL snapshot storage, delivery ledger and migration entry point; real DB integration pending.
+- `docs/database-setup.md`, `docs/source-review.md`: connection preparation and additional-source evidence.
+- `tests/test_db.py`, `tests/test_db_integration.py`, `tests/test_motir.py`: DB safeguards, opt-in isolated PostgreSQL integration and third-source behavior.
 - `briefing/__main__.py`: GDELT/RSS requests, parsing, normalization, URL deduplication, per-source status, CLI and preview.
 - `briefing/email.py`: email validation and STARTTLS SMTP sender.
 - `briefing/delivery.py`: SQLite delivery ledger and no-auto-retry dispatch behavior.
