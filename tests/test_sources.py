@@ -1,3 +1,4 @@
+import io
 import unittest
 from unittest.mock import patch
 
@@ -5,109 +6,73 @@ import briefing.__main__ as app
 
 
 class MultiSourceTests(unittest.TestCase):
-    def test_deepsearch_response_maps_to_shared_article_fields(self):
-        normalize_deepsearch = getattr(app, "normalize_deepsearch", None)
-        self.assertTrue(callable(normalize_deepsearch), "DeepSearch normalization is not implemented")
-        payload = {"data": [{
-            "title": "반도체 장비 투자 확대",
-            "publisher": "Example News",
-            "content_url": "https://news.example.test/article/1",
-            "published_at": "2026-11-24T08:30:00+09:00",
-            "summary": "이 내용은 메일로 복사되면 안 됩니다.",
-        }]}
+    @patch("briefing.__main__.collect_msit_rss")
+    @patch("briefing.__main__.collect")
+    def test_limit_preserves_both_sources_after_deduplication(self, gdelt, rss):
+        gdelt.return_value = {"articles": [
+            {"title": "A", "url": "https://example.test/a"},
+            {"title": "B", "url": "https://example.test/b"},
+        ]}
+        rss.return_value = ([
+            {"title": "A duplicate", "url": "https://example.test/a", "provider": "MSIT RSS"},
+            {"title": "C", "url": "https://example.test/c", "provider": "MSIT RSS"},
+        ], 0)
+        result = app.collect_sources("Infineon", 24, 2)
+        self.assertEqual([a["url"] for a in result["articles"]],
+                         ["https://example.test/a", "https://example.test/c"])
+        self.assertTrue(result["limit_reached"])
+        self.assertEqual(result["sources"], {"GDELT": "ok", "MSIT RSS": "ok"})
 
-        articles, rejected = normalize_deepsearch(payload)
+    @patch("briefing.__main__.collect_msit_rss")
+    @patch("briefing.__main__.collect", side_effect=OSError("provider unavailable"))
+    def test_failed_source_preserves_other_results(self, gdelt, rss):
+        rss.return_value = ([{"title": "A", "url": "https://example.test/a"}], 0)
+        result = app.collect_sources("Infineon", 24, 2)
+        self.assertEqual(len(result["articles"]), 1)
+        self.assertEqual(result["sources"], {"GDELT": "failed", "MSIT RSS": "ok"})
 
+    @patch("briefing.__main__.collect_msit_rss", side_effect=ValueError("bad XML"))
+    @patch("briefing.__main__.collect", side_effect=OSError("provider unavailable"))
+    def test_both_failures_remain_visible(self, gdelt, rss):
+        result = app.collect_sources("Infineon", 24, 2)
+        self.assertEqual(result["articles"], [])
+        self.assertEqual(result["sources"], {"GDELT": "failed", "MSIT RSS": "failed"})
+
+    def test_date_only_overlap_without_inventing_midnight(self):
+        dates = ["2026.11.25", "2026-11-26", "2026.11.24", "2026.11.27",
+                 "2026-11-25T07:59:00+09:00", "2026-11-25T08:00:00+09:00"]
+        xml = "<rss><channel>" + "".join(
+            f"<item><title>Infineon {i}</title><link>https://example.test/{i}</link>"
+            f"<pubDate>{date}</pubDate></item>" for i, date in enumerate(dates)
+        ) + "</channel></rss>"
+        with patch("briefing.__main__.urlopen", return_value=io.BytesIO(xml.encode())):
+            articles, rejected = app.collect_msit_rss(
+                "Infineon", 24, 25, now=app.datetime(2026, 11, 26, 8, tzinfo=app.KST))
         self.assertEqual(rejected, 0)
-        self.assertEqual(articles, [{
-            "title": "반도체 장비 투자 확대",
-            "url": "https://news.example.test/article/1",
-            "source": "Example News",
-            "provider": "DeepSearch",
-            "observed_at": None,
-            "published_at": "2026-11-24T08:30:00+09:00",
-            "language": "ko",
-        }])
+        self.assertEqual([a["url"] for a in articles],
+                         ["https://example.test/0", "https://example.test/1", "https://example.test/5"])
+        self.assertEqual(articles[0]["published_at"], "2026-11-25")
+        self.assertEqual(articles[0]["published_precision"], "date")
+        self.assertEqual(articles[2]["published_precision"], "datetime")
+        body = app.render(dict(collected_at="test", query="Infineon", articles=articles,
+                               rejected=0, limit_reached=False))
+        self.assertIn("발행일: 2026-11-25", body)
+        self.assertIn("발행 시각: 2026-11-25T08:00:00+09:00", body)
 
-    def test_email_preview_labels_deepsearch_timestamp_as_publication_time(self):
-        article, _ = app.normalize_deepsearch({"data": [{
-            "title": "Headline", "publisher": "Example News",
-            "content_url": "https://news.example.test/article/1",
-            "published_at": "2026-11-24T08:30:00+09:00",
-        }]}, now=app.datetime(2026, 11, 24, 9, 0, tzinfo=app.KST))
-        body = app.render({
-            "collected_at": "2026-11-24T09:00:00+09:00", "query": "semiconductor",
-            "articles": article, "rejected": 0, "limit_reached": False,
-            "sources": {"DeepSearch": "ok"},
-        })
-
-        self.assertIn("발행 시각: 2026-11-24T08:30:00+09:00", body)
-        self.assertNotIn("관측 시각: 확인 불가", body)
-
-    @patch("briefing.__main__.collect")
-    @patch("briefing.__main__.collect_deepsearch", create=True)
-    def test_collect_sources_uses_both_and_deduplicates_by_url(self, deepsearch, gdelt):
-        collect_sources = getattr(app, "collect_sources", None)
-        self.assertTrue(callable(collect_sources), "multi-source collection is not implemented")
-        gdelt.return_value = {"articles": [{
-            "title": "GDELT headline", "url": "https://news.example.test/a",
-            "seendate": "20261124T000000Z", "language": "English",
-        }]}
-        deepsearch.return_value = {"data": [{
-            "title": "DeepSearch headline", "publisher": "Example News",
-            "content_url": "https://news.example.test/a",
-            "published_at": "2026-11-24T09:00:00+09:00",
-        }, {
-            "title": "Second headline", "publisher": "Other News",
-            "content_url": "https://other.example.test/b",
-            "published_at": "2026-11-24T09:00:00+09:00",
-        }]}
-
-        result = collect_sources("semiconductor OR automation", 24, 10, "secret-test-key")
-
-        gdelt.assert_called_once_with("semiconductor OR automation", 24, 10)
-        deepsearch.assert_called_once_with("semiconductor OR automation", 24, 10, "secret-test-key")
-        self.assertEqual([a["url"] for a in result["articles"]], [
-            "https://news.example.test/a", "https://other.example.test/b",
-        ])
-        self.assertEqual(result["articles"][0]["provider"], "GDELT")
-        self.assertEqual(result["articles"][1]["provider"], "DeepSearch")
-        self.assertEqual(result["sources"], {"GDELT": "ok", "DeepSearch": "ok"})
-
-    @patch("briefing.__main__.collect")
-    @patch("briefing.__main__.collect_deepsearch", create=True)
-    def test_one_source_failure_keeps_other_results_and_marks_partial(self, deepsearch, gdelt):
-        collect_sources = getattr(app, "collect_sources", None)
-        self.assertTrue(callable(collect_sources), "multi-source collection is not implemented")
-        gdelt.side_effect = OSError("provider unavailable")
-        deepsearch.return_value = {"data": [{
-            "title": "One result", "publisher": "Example News",
-            "content_url": "https://news.example.test/a",
-            "published_at": "2026-11-24T09:00:00+09:00",
-        }]}
-
-        result = collect_sources("semiconductor", 24, 10, "secret-test-key")
-
-        self.assertEqual(result["sources"], {"GDELT": "failed", "DeepSearch": "ok"})
-        self.assertEqual(len(result["articles"]), 1)
-
-    @patch("briefing.__main__.collect")
-    @patch("briefing.__main__.collect_deepsearch", create=True)
-    def test_missing_deepsearch_key_does_not_expose_key_or_discard_gdelt(self, deepsearch, gdelt):
-        collect_sources = getattr(app, "collect_sources", None)
-        self.assertTrue(callable(collect_sources), "multi-source collection is not implemented")
-        gdelt.return_value = {"articles": [{
-            "title": "GDELT headline", "url": "https://news.example.test/a",
-            "seendate": "20261124T000000Z", "language": "English",
-        }]}
-
-        result = collect_sources("semiconductor", 24, 10, None)
-
-        deepsearch.assert_not_called()
-        self.assertEqual(result["sources"], {
-            "GDELT": "ok", "DeepSearch": "skipped_not_configured",
-        })
-        self.assertEqual(len(result["articles"]), 1)
+    def test_rss_description_is_not_emitted_even_with_rights_marker(self):
+        xml = """<rss><channel><item><title>Infineon</title>
+        <link>https://example.test/a</link><pubDate>2026.11.26</pubDate>
+        <rights>KOGL Type 1</rights><description>Do not redistribute this text.</description>
+        </item></channel></rss>"""
+        with patch("briefing.__main__.urlopen", return_value=io.BytesIO(xml.encode())):
+            articles, _ = app.collect_msit_rss(
+                "Infineon", 24, 25, now=app.datetime(2026, 11, 26, 8, tzinfo=app.KST))
+        self.assertEqual(len(articles), 1)
+        self.assertNotIn("Do not redistribute", str(articles))
+        articles[0]["summary"] = "Do not redistribute this text."
+        body = app.render(dict(collected_at="test", query="Infineon", articles=articles,
+                               rejected=0, limit_reached=False))
+        self.assertNotIn("Do not redistribute", body)
 
 
 if __name__ == "__main__":

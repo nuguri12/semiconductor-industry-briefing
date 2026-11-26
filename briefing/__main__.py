@@ -1,5 +1,6 @@
 import argparse
 from datetime import datetime, timezone, timedelta
+from itertools import zip_longest
 import html
 import json
 import os
@@ -134,14 +135,6 @@ def collect_msit_rss(query, hours, limit, now=None):
     articles, rejected = [], 0
     for row in entries:
         title = clean(row.findtext("title") or row.findtext(f"{atom}title"))
-        description = (row.findtext("description") or row.findtext(f"{atom}summary")
-                       or row.findtext(f"{atom}content") or "")
-        description = clean(re.sub(r"<[^>]+>", " ", description))[:500]
-        rights = (row.findtext("rights") or
-                  row.findtext("{http://purl.org/dc/elements/1.1/}rights") or "")
-        licensed = bool(re.search(r"(?:공공누리|KOGL).{0,20}(?:제?1유형|type\s*1)", rights, re.I))
-        author = (row.findtext("author") or
-                  row.findtext("{http://purl.org/dc/elements/1.1/}creator") or "")
         url = row.findtext("link") or ""
         if not url:
             atom_link = row.find(f"{atom}link")
@@ -157,30 +150,31 @@ def collect_msit_rss(query, hours, limit, now=None):
             rejected += 1
             continue
         date_value = (row.findtext("pubDate") or row.findtext(f"{atom}published")
-                      or row.findtext(f"{atom}updated") or "")
+                      or row.findtext(f"{atom}updated") or "").strip()
+        date_only = bool(re.fullmatch(r"\d{4}[.-]\d{2}[.-]\d{2}", date_value))
         try:
             try:
-                published = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
+                published = datetime.fromisoformat(
+                    date_value.replace(".", "-") if date_only else date_value.replace("Z", "+00:00"))
             except ValueError:
-                try:
-                    published = parsedate_to_datetime(date_value)
-                except (TypeError, ValueError):
-                    published = datetime.strptime(date_value, "%Y.%m.%d").replace(tzinfo=KST)
+                published = parsedate_to_datetime(date_value)
             if published.tzinfo is None:
                 published = published.replace(tzinfo=KST)
             published = published.astimezone(KST)
         except (TypeError, ValueError):
             rejected += 1
             continue
-        if not cutoff <= published <= now:
+        in_window = (cutoff.date() <= published.date() <= now.date() if date_only
+                     else cutoff <= published <= now)
+        if not in_window:
             continue
-        haystack = f"{title} {description if licensed else ''}".casefold()
+        haystack = title.casefold()
         if terms and not any(term.casefold() in haystack for term in terms):
             continue
         articles.append(dict(title=title, url=url, source="과학기술정보통신부",
-                             provider="MSIT RSS", summary=description if licensed else None,
-                             author=clean(author) or None, license="KOGL-1" if licensed else None,
-                             observed_at=None, published_at=published.isoformat(), language="ko"))
+                             provider="MSIT RSS", observed_at=None,
+                             published_at=published.date().isoformat() if date_only else published.isoformat(),
+                             published_precision="date" if date_only else "datetime", language="ko"))
         if len(articles) >= limit:
             break
     return articles, rejected
@@ -195,33 +189,42 @@ def collect_sources(query, hours, limit):
         rejected += bad
         sources["GDELT"] = "ok"
         limit_reached |= len(payload["articles"]) >= limit
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        print(f"GDELT: {type(error).__name__} {getattr(error, 'code', '')}", file=sys.stderr)
         batches["GDELT"] = []
 
     try:
         batches["MSIT RSS"], bad = collect_msit_rss(query, hours, limit)
         rejected += bad
         sources["MSIT RSS"] = "ok"
-    except (OSError, ValueError):
+        limit_reached |= len(batches["MSIT RSS"]) >= limit
+    except (OSError, ValueError) as error:
+        print(f"MSIT RSS: {type(error).__name__} {getattr(error, 'code', '')}", file=sys.stderr)
         batches["MSIT RSS"] = []
 
-    articles, seen = [], set()
+    seen = set()
     for provider in ("GDELT", "MSIT RSS"):
+        unique = []
         for article in batches[provider]:
             if article["url"] in seen:
                 continue
             seen.add(article["url"])
-            articles.append(article)
+            unique.append(article)
+        batches[provider] = unique
+    articles = [article for pair in zip_longest(batches["GDELT"], batches["MSIT RSS"])
+                for article in pair if article is not None]
     return dict(articles=articles[:limit], rejected=rejected, sources=sources,
                 limit_reached=limit_reached or len(articles) > limit)
 
 
 def render(result):
-    lines = ["뉴스 수집 테스트", f"수집 시각: {result['collected_at']}",
+    lines = ["반도체·자동화 장비 산업 브리핑", f"수집 시각: {result['collected_at']}",
              f"조회: {result['query']}", f"기사 {len(result['articles'])}건 / 제외 {result['rejected']}건",
              "GDELT 관측 시각은 원문 발행 시각과 다를 수 있습니다."]
     for provider, status in result.get("sources", {}).items():
         lines.append(f"{provider}: {status}")
+    if result.get("status") == "partial":
+        lines.append("일부 소스 수집 실패 또는 유효하지 않은 항목 제외: 확인된 기사만 포함합니다.")
     if result["limit_reached"]:
         lines.append("조회 상한에 도달했습니다. 전체 기사 목록이 아닐 수 있습니다.")
     if not result["articles"]:
@@ -231,13 +234,12 @@ def render(result):
         published = article.get("published_at")
         timestamp = published or article.get("observed_at")
         time_label = "발행 시각" if published else "관측 시각"
+        if article.get("published_precision") == "date":
+            time_label = "발행일"
         lines.extend(["", f"{index}. {article['title']}",
                       f"수집 소스: {article.get('provider', 'GDELT')}",
                       f"출처: {article['source']}",
                       f"{time_label}: {timestamp or '확인 불가'}",
-                      *([f"요약: {article['summary']}"] if article.get("summary") else []),
-                      *([f"작성자: {article['author']}"] if article.get("author") else []),
-                      *(["이용표시: 공공누리 제1유형"] if article.get("license") == "KOGL-1" else []),
                       f"원문: {article['url']}"])
     return "\n".join(lines) + "\n"
 
@@ -267,6 +269,10 @@ def main():
             with open(args.input, encoding="utf-8") as stream:
                 payload = json.load(stream)
             articles, rejected = normalize(payload)
+            unique = {}
+            for article in articles:
+                unique.setdefault(article['url'], article)
+            articles = list(unique.values())[:args.limit]
             sources = {"GDELT fixture": "ok"}
             limit_reached = len(payload["articles"]) >= args.limit
         else:
@@ -296,8 +302,8 @@ def main():
                     print(f"검증 오류: {error}", file=sys.stderr)
                 return 2
         elif args.send:
-            if result['status'] in ('invalid_records', 'partial', 'empty'):
-                print('발송 보류: 유효한 기사 전체 결과가 필요합니다. 부분·빈 결과 정책은 미정입니다.', file=sys.stderr)
+            if not result['articles']:
+                print('발송 보류: 유효한 기사가 없습니다.', file=sys.stderr)
                 return 2
             if not args.to or not args.delivery_id:
                 parser.error("--send에는 --to와 --delivery-id가 필요합니다.")
@@ -324,7 +330,7 @@ def main():
             return 0 if outcome.status == "sent" else 3
         else:
             print(output, end="\n")
-        return 0
+        return 1 if all(status == "failed" for status in sources.values()) else 0
     except (OSError, URLError, ValueError) as error:
         print(f"수집 실패: {error}", file=sys.stderr)
         return 1

@@ -12,7 +12,7 @@ from .delivery import DeliveryUnknown
 def build_message(result, body, recipient=""):
     message = EmailMessage()
     message["To"] = recipient
-    message["Subject"] = f"반도체·자동화 장비 뉴스 테스트 브리핑 ({result['collected_at']})"
+    message["Subject"] = f"[산업 브리핑] {result['collected_at'].split('T')[0]}"
     message.set_content(body)
     return message
 

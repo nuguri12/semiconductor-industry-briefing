@@ -55,9 +55,3 @@
 - **Finding:** Two live collection attempts returned HTTP 429 after the adapter's single retry; no GDELT articles were collected.
 - **Impact:** The current send gate blocks partial and empty live results, so a live-source briefing cannot be sent until GDELT responds successfully.
 - **Next action:** Retry a live sample later at a lower request frequency and inspect GDELT response guidance if 429 persists.
-
-## ISSUE-009 — Gmail SMTP authentication
-
-- **Status:** Open
-- **Finding:** EHLO and STARTTLS succeed; Gmail advertises LOGIN, PLAIN, and XOAUTH2. Password-based `smtplib.login()` is followed by `SMTPServerDisconnected` with no SMTP reply code. Host, port, and sender match the Gmail settings; the connected Gmail MCP profile resolves to the same account. No message was accepted. This narrows the issue to the local SMTP authentication path but does not reveal Google's exact rejection reason.
-- **Next action:** Prefer Gmail OAuth2/XOAUTH2 or Gmail API for the project. An app password is an alternative only if the account is eligible; SMTP does not trigger an interactive 2-Step Verification prompt. Use a new delivery ID for any later send attempt.

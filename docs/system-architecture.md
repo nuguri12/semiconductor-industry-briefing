@@ -1,5 +1,7 @@
 # 데일리 브리핑 시스템 아키텍처
 
+> **현재 MVP 우선 적용(2026-11-26):** 현재 실행 구조는 단일 로컬 Python CLI → GDELT·MSIT RSS → 제목·출처·링크·관측 시각/발행일 정규화 → 기존 SMTP 발송이며, SQLite 파일로 발송 ID와 결과를 보존한다. 정상 기사 1건 이상이면 일부 실패 경고와 함께 발송한다. 기사 본문·RSS 설명·GPT는 사용하지 않는다. Gmail 앱 비밀번호의 합성 메일 수신은 확인했다. 아래 Neon·GitHub Actions·외부 감시·복구 설계는 **후속 확장안**이며 지금 구축할 필수 요소가 아니다. Gmail API/OAuth 추가 구현도 필요하지 않다. 현재 동작은 [README](../README.md)와 [실행 안내](collection-test.md)가 우선한다. 임시 클라우드 실행기에 옮길 때는 SQLite 이력의 영속 보존을 먼저 해결해야 한다.
+
 상태: 배포 세부안은 권고안이며 서비스 계정, 리전, 예산 또는 운영 자원은 아직 확정되지 않았다. **현재 구현은 GDELT DOC API와 과기정통부 RSS를 사용하는 로컬 Python MVP**다. DeepSearch는 제거했고 NAVER는 권한 확인까지 보류한다. 기준 문서는 [기획안](cron-job-plan.md), [개발 계획](development-plan.md), `project_memories/`다.
 
 ## 목표와 MVP 경계

@@ -25,7 +25,8 @@ class BriefingTests(unittest.TestCase):
 
         self.assertEqual(rejected, 0)
         self.assertEqual(len(articles), 1)
-        self.assertEqual(articles[0]["published_at"], "2026-11-23T00:00:00+09:00")
+        self.assertEqual(articles[0]["published_at"], "2026-11-23")
+        self.assertEqual(articles[0]["published_precision"], "date")
 
     def test_load_dotenv_keeps_existing_environment_values(self):
         import os
@@ -51,6 +52,7 @@ class BriefingTests(unittest.TestCase):
         message = build_message(result, render(result), "review@example.invalid")
         self.assertEqual(validate_message(message), [])
         self.assertEqual(message["To"], "review@example.invalid")
+        self.assertEqual(message["Subject"], "[산업 브리핑] 2026-11-21")
         self.assertEqual(message["From"], None)
 
     def test_email_rejects_missing_fields_but_accepts_http_source_link(self):
