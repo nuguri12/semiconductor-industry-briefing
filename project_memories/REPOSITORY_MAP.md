@@ -2,6 +2,11 @@
 
 Last checked: 2026-11-26
 
+- `briefing/schedule.py`, `briefing/job.py`: fixed UTC windows, configuration/delivery keys, persistent scheduled claim/replay and explicit send gates.
+- `briefing/actions.py`, `.github/workflows/briefing.yml`: GitHub dry-run adapter and opt-in daily workflow; no SMTP/DB secrets in workflow.
+- `migrations/002_scheduled_runs.sql`: collecting/failed states and plan metadata; real DB application pending.
+- `tests/test_schedule.py`, `tests/test_job.py`, `tests/test_actions.py`, `docs/scheduled-run.md`: boundaries, retries, failure checks and operation instructions.
+
 - `README.md`: GDELT + MSIT + MOTIR source list, rights boundary and commands.
 - `briefing/db.py`, `migrations/001_briefing.sql`, `requirements.txt`: explicit PostgreSQL snapshot storage, delivery ledger and migration entry point; real DB integration pending.
 - `docs/database-setup.md`, `docs/source-review.md`: connection preparation and additional-source evidence.

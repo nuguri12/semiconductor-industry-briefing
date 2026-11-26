@@ -22,6 +22,18 @@ def sample():
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_saved_all_source_failure_returns_failure_exit(self):
+        payload = sample()
+        payload['articles'] = []
+        payload['sources'] = {'GDELT': 'failed', 'MSIT RSS': 'failed'}
+        payload['source_details'] = {'GDELT': {'count': 0}, 'MSIT RSS': {'count': 0}}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'failed.json'
+            path.write_text(json.dumps(payload), encoding='utf-8')
+            result = subprocess.run([sys.executable, '-m', 'briefing', '--input', str(path), '--json'],
+                                    capture_output=True)
+            self.assertEqual(result.returncode, 1)
+
     def test_cli_roundtrip_preserves_all_collection_metadata(self):
         payload = sample()
         with tempfile.TemporaryDirectory() as folder:

@@ -1,12 +1,16 @@
 # Project State
 
-Last updated: 2026-11-26
+Last updated: 2026-11-27
 
 ## Objective
 
 Build a daily briefing of semiconductor and automation-equipment industry news, then deliver it to the team after content rights, quality, schedule, and recipients are confirmed.
 
 ## Current Status
+
+- Latest 2026-11-27: implemented fixed-window `briefing.schedule` / `briefing.job`, explicit GDELT absolute time parameters, shared RSS cutoff, scheduled DB claim/replay (migration 002), and GitHub Actions dry-run workflow. No Supabase connection, SMTP send, remote workflow execution or schedule activation in this iteration.
+- Validation: 70 tests discovered, 65 passed, 5 real-PostgreSQL tests skipped. actionlint v1.7.12 passed. Manual historical-slot live dry-run yielded MOTIR 1 article, MSIT 0, GDELT 429; date-only overlap is explicitly disclosed. Evidence and caveats: `docs/scheduled-run.md`.
+- Next: configure Supabase and run real migration/permission/concurrency checks; test Actions manually on GitHub; migrate existing delivery history before cloud send. Backup/retention and missing-run monitoring remain pending. Workflow schedule is opt-in via repository variable; never equate a disabled dry-run workflow with deployed production scheduling.
 
 - 2026-11-27 provider decision: user chose Supabase Free instead of Neon. Existing PostgreSQL code is portable; Supabase TLS/session-pooler/roles remain unverified. Latest user decision: try GitHub Actions schedule first with workflow_dispatch for manual runs; migrate the trigger to Cloudflare only if observed timing or missed-run problems warrant it. Fixed scheduled-window keys and start/completion monitoring remain to implement. Runner queue delays require separate diagnosis. See latest section of `docs/database-setup.md`; older Neon references below are historical.
 

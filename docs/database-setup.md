@@ -6,7 +6,7 @@
 
 사용자의 최신 결정에 따라 우선 GitHub Actions `schedule`로 예약하고 `workflow_dispatch`로 수동 실행한다. Python 수집·정규화·SMTP 실행도 GitHub Actions, 영속 상태는 Supabase가 담당한다. Cloudflare는 지연·누락 개선이 필요하다고 관측된 경우의 후속 이전안이다. 어느 트리거도 아직 배포하지 않았으며 정확한 시각의 이메일 도착을 보장하지 않는다.
 
-공통 트리거 계약: 예정 실행 시각에서 고정된 `scheduled_for`, `window_start`, `window_end`, `run_key`를 계산한다. 재호출은 같은 키를 유지하며 실제 job 시작 시각으로 조회 구간을 바꾸지 않는다. 예정 시각·workflow 생성·job 시작·발송 완료를 구분해 기록한다. 현재 수동 snapshot key와 collecting 선점 스키마는 이 계약에 맞춰 후속 변경이 필요하다.
+공통 트리거 계약: 예정 실행 시각에서 고정된 `scheduled_for`, `window_start`, `window_end`, `run_key`를 계산한다. 재호출은 같은 키를 유지하며 실제 job 시작 시각으로 조회 구간을 바꾸지 않는다. 예정 시각·workflow 생성·작업 시작·발송 완료를 구분해 기록한다. `briefing.job`, `briefing.schedule` 및 migration 002로 계약과 collecting 선점을 구현했다. 실제 DB 검증은 대기 중이며 실행법과 한계는 [예약 실행 안내](scheduled-run.md)를 따른다.
 
 검증 순서: 수동 dry-run → Supabase 통합 및 실제 수신 검증 → 예약 dry-run 관찰 → 예약 실발송. 초기 관찰은 7회 실행을 제안하고 허용 지연·누락 기준은 운영 설정에서 확정한다. 기준 초과가 확인되면 원인이 schedule 이벤트 지연인지 runner 큐 대기인지 구분한다. 전자라면 Cloudflare Cron → workflow_dispatch로 이전하고, 후자라면 실행 환경도 별도로 검토한다. Cloudflare 이전 시 기존 schedule을 먼저 비활성화하고 동일 run_key와 DB 중복 방지 규칙을 유지해 이중 발송을 막는다.
 
@@ -28,7 +28,7 @@ DB/SMTP 비밀값은 GitHub 실행 환경에 둔다. 향후 Cloudflare로 이전
 ## 현재 구현 범위
 
 - `requirements.txt`: psycopg binary 3.3.4.
-- `migrations/001_briefing.sql`: runs, briefings, deliveries. DB는 직접 생성하지 않고 준비된 Neon 프로젝트에 적용한다.
+- `migrations/001_briefing.sql`: runs, briefings, deliveries. `002_scheduled_runs.sql`: 예약 plan, collecting/failed 상태 추가. 준비된 Supabase 프로젝트에 순서대로 적용한다.
 - `python -m briefing.db --migrate`: `DATABASE_MIGRATION_URL`의 direct 연결, migration checksum과 트랜잭션 잠금. 실패 시 롤백. 정상 실행 명령에는 migration 권한을 주지 않는다.
 - `--input <snapshot.json> --store-db`: 버전 있는 저장 결과를 DB에 불변 저장. `--email-check`와 함께 사용 시 run/briefing만 생성하며 delivery/SMTP 호출은 없음.
 - `--store-db --send`: 같은 DB에서 발송 선점·결과 관리. DB 실패 시 SQLite로 자동 우회하지 않음.
@@ -45,6 +45,7 @@ DB/SMTP 비밀값은 GitHub 실행 환경에 둔다. 향후 Cloudflare로 이전
 REVOKE ALL ON SCHEMA briefing FROM PUBLIC;
 GRANT USAGE ON SCHEMA briefing TO briefing_app;
 GRANT SELECT, INSERT ON briefing.runs, briefing.briefings TO briefing_app;
+GRANT UPDATE (status, source_results) ON briefing.runs TO briefing_app;
 GRANT SELECT, INSERT, UPDATE ON briefing.deliveries TO briefing_app;
 ```
 
@@ -60,8 +61,8 @@ python -m briefing --input output/live.json --store-db --email-check
 
 ## 후속 단계와 제한
 
-현재 run key는 저장 결과의 수집 시각·검색어·hours에서 계산한다. 동일 snapshot 재실행에만 안정적이다. 예약 운영에는 절대 조회 구간과 config hash에 기반한 키·수집 선점이 추가로 필요하다. 따라서 아직 Actions 예약 실발송을 연결하지 않는다.
+수동 snapshot key는 수집 시각·검색어·hours를 사용한다. 새 예약 경로는 고정 조회 구간·config hash를 사용하며 DB 선점과 완료 결과 재사용을 구현했다. 예약 workflow는 dry-run 전용이고 실제 DB 통합 검증 전 실발송을 연결하지 않는다.
 
-현재 migration은 수동 snapshot 저장의 최소 스키마다. 운영 설계의 collecting/failed 실행 선점, 절대 구간, 보존 정리, SQLite 이관, 백업/복원은 후속 migration과 검증 대상이다. 이관 전에 클라우드 실발송을 활성화하지 않는다. delivery key와 briefing/recipient가 다르면 오류로 막고, 같은 briefing을 새 key로 우회 발송하는 것도 UNIQUE 제약으로 차단한다.
+보존 정리, SQLite 이관, 백업/복원은 후속 migration과 검증 대상이다. 이관 전에 클라우드 실발송을 활성화하지 않는다. delivery key와 briefing/recipient가 다르면 오류로 막고, 같은 briefing을 새 key로 우회 발송하는 것도 UNIQUE 제약으로 차단한다.
 
 실제 Postgres가 없는 상태에서 모의 테스트 통과를 SQL·동시성·권한 검증 완료로 표현하지 않는다. 연결 준비 완료와 클라우드 배포 완료는 구분한다.

@@ -16,7 +16,9 @@ def digest(value):
 
 
 def snapshot_key(result):
-    # Manual snapshots only: scheduling will need an explicit fixed window key.
+    if 'schedule' in result:
+        from .schedule import validate_plan
+        return validate_plan(result['schedule'])['run_key']
     return digest({key: result.get(key) for key in ('collected_at', 'query', 'hours')})
 
 
@@ -37,21 +39,23 @@ def connection(url):
 
 
 def migrate(url):
-    path = Path(__file__).resolve().parent.parent / 'migrations' / '001_briefing.sql'
-    sql = path.read_text(encoding='utf-8')
-    checksum = hashlib.sha256(sql.encode()).hexdigest()
+    paths = sorted((Path(__file__).resolve().parent.parent / 'migrations').glob('[0-9][0-9][0-9]_*.sql'))
     with connection(url) as db:
         db.execute('SELECT pg_advisory_xact_lock(736421)')
         db.execute('CREATE SCHEMA IF NOT EXISTS briefing')
         db.execute('CREATE TABLE IF NOT EXISTS briefing.schema_migrations '
                    '(version integer PRIMARY KEY, checksum text NOT NULL)')
-        row = db.execute('SELECT checksum FROM briefing.schema_migrations WHERE version=1').fetchone()
-        if row:
-            if row[0] != checksum:
-                raise ValueError('Applied migration checksum differs; create a new migration')
-            return
-        db.execute(sql)
-        db.execute('INSERT INTO briefing.schema_migrations VALUES (1, %s)', (checksum,))
+        for path in paths:
+            version = int(path.name.split('_')[0])
+            sql = path.read_text(encoding='utf-8')
+            checksum = hashlib.sha256(sql.encode()).hexdigest()
+            row = db.execute('SELECT checksum FROM briefing.schema_migrations WHERE version=%s', (version,)).fetchone()
+            if row:
+                if row[0] != checksum:
+                    raise ValueError('Applied migration checksum differs; create a new migration')
+                continue
+            db.execute(sql)
+            db.execute('INSERT INTO briefing.schema_migrations VALUES (%s, %s)', (version, checksum))
 
 
 class PostgresStore:
@@ -61,6 +65,8 @@ class PostgresStore:
     def save(self, result, subject, body):
         from .__main__ import read_snapshot
         read_snapshot(result)
+        if 'schedule' in result:
+            raise ValueError('Use the scheduled job entry point to persist scheduled snapshots')
         content_hash = digest([result, subject, body])
         with connection(self.url) as db:
             row = db.execute(
@@ -93,6 +99,51 @@ class PostgresStore:
             if not row:
                 raise ValueError('Stored briefing not found')
             return row
+
+    def claim_schedule(self, plan):
+        """Return (claim id, None) to the owner or (None, saved briefing) on replay."""
+        from .schedule import validate_plan
+        validate_plan(plan)
+        with connection(self.url) as db:
+            row = db.execute(
+                'INSERT INTO briefing.runs '
+                '(id,run_key,trigger,collected_at,query,status,source_results,schedule) '
+                "VALUES (%s,%s,'schedule',now(),%s,'collecting','{}'::jsonb,%s::jsonb) "
+                'ON CONFLICT (run_key) DO NOTHING RETURNING id',
+                (uuid.uuid4(), plan['run_key'], plan['query'], json.dumps(plan))).fetchone()
+            if row:
+                return str(row[0]), None
+            row = db.execute('SELECT r.status,b.id,b.payload,b.subject,b.body FROM briefing.runs r '
+                             'LEFT JOIN briefing.briefings b ON b.run_id=r.id WHERE r.run_key=%s',
+                             (plan['run_key'],)).fetchone()
+            if row and row[0] in ('ready', 'empty') and row[1] is not None:
+                return None, (str(row[1]), row[2], row[3], row[4])
+            raise ValueError('Scheduled run already collecting or failed; manual reconciliation required')
+
+    def complete_schedule(self, claim_id, result, subject, body):
+        from .__main__ import read_snapshot
+        read_snapshot(result)
+        plan = result['schedule']
+        with connection(self.url) as db:
+            row = db.execute('SELECT id FROM briefing.runs '
+                             "WHERE id=%s AND run_key=%s AND status='collecting' FOR UPDATE",
+                             (claim_id, plan['run_key'])).fetchone()
+            if row is None:
+                raise ValueError('Scheduled collection claim is not owned by this execution')
+            bid = uuid.uuid4()
+            db.execute('INSERT INTO briefing.briefings '
+                       '(id,run_id,schema_version,payload,content_hash,subject,body) '
+                       'VALUES (%s,%s,%s,%s::jsonb,%s,%s,%s)',
+                       (bid, claim_id, result['schema_version'], json.dumps(result),
+                        digest([result, subject, body]), subject, body))
+            db.execute('UPDATE briefing.runs SET status=%s, source_results=%s::jsonb WHERE id=%s',
+                       ('ready' if result['articles'] else 'empty',
+                        json.dumps(dict(states=result['sources'], details=result.get('source_details', {}))), claim_id))
+            return str(bid)
+
+    def fail_schedule(self, claim_id):
+        with connection(self.url) as db:
+            db.execute("UPDATE briefing.runs SET status='failed' WHERE id=%s AND status='collecting'", (claim_id,))
 
 
 class PostgresLedger:

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from briefing.db import PostgresStore, PostgresLedger, connection, migrate, snapshot_key
 from briefing.delivery import dispatch, DeliveryUnknown
 from test_snapshot import sample
+from briefing.schedule import make_plan
 
 
 @unittest.skipUnless(os.environ.get('BRIEFING_TEST_DATABASE_URL'), 'Isolated PostgreSQL test URL not configured')
@@ -60,3 +61,23 @@ class PostgresIntegrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.save(self.result, 'subject', 'changed')
         self.assertEqual(self.store.load(bid)[2], 'body')
+
+    def test_schedule_claim_replay_and_completion(self):
+        self.result['schedule'] = make_plan('2026-11-27T08:10:00+09:00', self.result['query'])
+        plan = self.result['schedule']
+        claim_id, replay = self.store.claim_schedule(plan)
+        self.assertIsNone(replay)
+        with self.assertRaises(ValueError):
+            self.store.claim_schedule(plan)
+        bid = self.store.complete_schedule(claim_id, self.result, 'subject', 'body')
+        claim, saved = self.store.claim_schedule(plan)
+        self.assertIsNone(claim)
+        self.assertEqual(saved, (bid, self.result, 'subject', 'body'))
+
+    def test_failed_schedule_not_automatically_reclaimed(self):
+        self.result['schedule'] = make_plan('2026-11-27T08:10:00+09:00', self.result['query'])
+        plan = self.result['schedule']
+        claim_id, _ = self.store.claim_schedule(plan)
+        self.store.fail_schedule(claim_id)
+        with self.assertRaises(ValueError):
+            self.store.claim_schedule(plan)

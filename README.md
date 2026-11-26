@@ -81,10 +81,12 @@ python -m briefing --query '(Infineon OR ASE OR HYUNDAI OR MOBIS OR 반도체 OR
 
 ## 아직 구현되지 않은 항목
 
+GitHub Actions dry-run workflow와 고정 조회 구간 배치 로직은 구현했습니다. 예약 job은 `BRIEFING_SCHEDULE_ENABLED=true` 설정 전까지 비활성이고 원격 실행은 아직 검증하지 않았습니다. [예약 실행 안내](docs/scheduled-run.md)를 참고하세요.
+
 - AI 기반 기사 요약 및 근거 검증
 - OpenDART 및 네이버 API 적용, NIST 자동 수집
 - 환율·주가지수 등 시장 지표
-- 예약 실행, GitHub Actions 배포, 실행 감시
+- GitHub Actions 원격 실행 검증·예약 활성화, 실발송 운영, 실행 누락 감시
 - Neon 프로젝트 배포·실접속 검증, SQLite 이력 이관, 운영 백업/정리
 - 자동 팀 배포 및 확정된 운영 수신 대상
 

@@ -49,9 +49,15 @@ def retry_delay(value):
         return 5
 
 
-def collect(query, hours, limit):
-    params = urlencode(dict(query=query, mode="artlist", format="json",
-                            sort="datedesc", timespan=f"{hours}h", maxrecords=limit))
+def collect(query, hours, limit, window_end=None):
+    options = dict(query=query, mode="artlist", format="json", sort="datedesc", maxrecords=limit)
+    if window_end is None:
+        options['timespan'] = f'{hours}h'
+    else:
+        end = window_end.astimezone(timezone.utc)
+        options.update(startdatetime=(end - timedelta(hours=hours)).strftime('%Y%m%d%H%M%S'),
+                       enddatetime=end.strftime('%Y%m%d%H%M%S'))
+    params = urlencode(options)
     request = Request(ENDPOINT + "?" + params,
                       headers={"User-Agent": "briefing-prototype/0.1"})
     for attempt in range(2):
@@ -192,12 +198,13 @@ def collect_rss(endpoint, provider, publisher, query, hours, limit, now=None, da
     return articles, rejected
 
 
-def collect_sources(query, hours, limit):
+def collect_sources(query, hours, limit, window_end=None):
     sources = {"GDELT": "failed", "MSIT RSS": "failed", "MOTIR RSS": "failed"}
     source_details = {}
     batches, rejected, limit_reached = {}, 0, False
     try:
-        payload = collect(query, hours, limit)
+        payload = (collect(query, hours, limit) if window_end is None
+                   else collect(query, hours, limit, window_end=window_end))
         batches["GDELT"], bad = normalize(payload)
         rejected += bad
         sources["GDELT"] = "ok"
@@ -211,7 +218,8 @@ def collect_sources(query, hours, limit):
 
     for provider, collector in (("MSIT RSS", collect_msit_rss), ("MOTIR RSS", collect_motir_rss)):
         try:
-            batches[provider], bad = collector(query, hours, limit)
+            batches[provider], bad = (collector(query, hours, limit) if window_end is None
+                                      else collector(query, hours, limit, now=window_end.astimezone(KST)))
             rejected += bad
             sources[provider] = "ok"
             source_details[provider] = dict(count=len(batches[provider]), rejected=bad)
@@ -240,6 +248,8 @@ def collect_sources(query, hours, limit):
 
 def read_snapshot(payload):
     """Validate saved normalized output without reinterpreting it as GDELT data."""
+    if not isinstance(payload, dict):
+        raise ValueError('Snapshot must be an object')
     if payload.get("schema_version") != 1:
         raise ValueError("Unsupported briefing snapshot version")
     for key in ("collected_at", "query"):
@@ -291,6 +301,11 @@ def read_snapshot(payload):
                 "ok" if rows else "empty")
     if payload.get("status") != expected:
         raise ValueError("Snapshot status conflicts with its records")
+    if 'schedule' in payload:
+        from .schedule import validate_plan
+        plan = validate_plan(payload['schedule'])
+        if payload['query'] != plan['query'] or payload.get('hours') != plan['hours']:
+            raise ValueError('Snapshot query/window differs from its plan')
     return payload
 
 
@@ -298,6 +313,11 @@ def render(result):
     lines = ["반도체·자동화 장비 산업 브리핑", f"수집 시각: {result['collected_at']}",
              f"조회: {result['query']}", f"기사 {len(result['articles'])}건 / 제외 {result['rejected']}건",
              "GDELT 관측 시각은 원문 발행 시각과 다를 수 있습니다."]
+    if 'schedule' in result:
+        plan = result['schedule']
+        lines.append(f"고정 조회 구간: {plan['window_start']} ~ {plan['window_end']}")
+        if any(a.get('published_precision') == 'date' for a in result['articles']):
+            lines.append("날짜만 제공된 자료는 조회 날짜와 겹치는 항목이며 정확한 시간 포함 여부는 확인할 수 없습니다.")
     for provider, status in result.get("sources", {}).items():
         count = result.get("source_details", {}).get(provider, {}).get("count")
         lines.append(f"{provider}: {status}" + (f" (수집 {count}건)" if count is not None else ""))
@@ -436,7 +456,7 @@ def main():
             return 0 if outcome.status == "sent" else 3
         else:
             print(output, end="\n")
-        return 1 if all(status == "failed" for status in sources.values()) else 0
+        return 1 if all(status == "failed" for status in result['sources'].values()) else 0
     except (OSError, URLError, ValueError) as error:
         print(f"수집 실패: {error}", file=sys.stderr)
         return 1

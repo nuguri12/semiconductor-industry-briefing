@@ -1,0 +1,70 @@
+name: Briefing dry-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      scheduled_for:
+        description: 'Intended slot with timezone, e.g. 2026-11-27T08:10:00+09:00'
+        required: true
+        type: string
+      query:
+        description: 'Explicit OR-separated search terms'
+        default: '(Infineon OR ASE OR HYUNDAI OR MOBIS OR 반도체 OR 장비 OR 자동차)'
+        required: true
+        type: string
+      hours:
+        description: 'Collection window hours'
+        default: '24'
+        type: choice
+        options: ['24', '72']
+  schedule:
+    - cron: '10 23 * * *' # 08:10 KST; opt in using BRIEFING_SCHEDULE_ENABLED=true.
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: briefing-dry-run
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    if: github.event_name == 'workflow_dispatch' || vars.BRIEFING_SCHEDULE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install and test
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest discover -s tests -v
+      - name: Get original workflow creation time
+        id: timing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          created_at=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.created_at')
+          echo "created_at=$created_at" >> "$GITHUB_OUTPUT"
+      - name: Collect and validate without sending
+        env:
+          BRIEFING_EVENT: ${{ github.event_name }}
+          BRIEFING_RUN_CREATED_AT: ${{ steps.timing.outputs.created_at }}
+          BRIEFING_SCHEDULED_FOR: ${{ inputs.scheduled_for }}
+          BRIEFING_QUERY: ${{ inputs.query || '(Infineon OR ASE OR HYUNDAI OR MOBIS OR 반도체 OR 장비 OR 자동차)' }}
+          BRIEFING_HOURS: ${{ inputs.hours || '24' }}
+        run: python -m briefing.actions
+      - name: Keep dry-run evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: briefing-dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/scheduled/
+          retention-days: 7
+          if-no-files-found: ignore

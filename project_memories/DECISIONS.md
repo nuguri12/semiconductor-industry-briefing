@@ -1,5 +1,11 @@
 # Decisions
 
+## DEC-015 — Implement fixed-window dry-run before Supabase setup (2026-11-27)
+
+- **Decision:** User deferred Supabase configuration and requested remaining logic/verification. Implement deterministic scheduled windows and keys, absolute GDELT requests, shared RSS cutoff, a separate scheduled job entry point and optional PostgreSQL claim/replay. Keep the Actions adapter dry-run only and scheduled jobs disabled until the repository variable is enabled.
+- **Reason:** A delayed job must not silently shift its query window. Persistent completed results must be reused before a retry can send.
+- **Impact:** Schedule slot is inferred from original workflow created_at only within a six-hour bound; it cannot prove or recover a missing/day-late cron event. Date-only RSS is calendar-overlap metadata, not exact-hour evidence. No automatic stale-claim release or backfill. Supabase SQL/TLS/roles and hosted Actions execution remain unverified.
+
 ## DEC-014 — Try GitHub scheduling before Cloudflare (2026-11-27)
 
 - **Decision:** User chose GitHub Actions schedule first, retaining workflow_dispatch for manual runs. Cloudflare migration is conditional on observed timing/missed-run problems, superseding DEC-013's immediate external-trigger proposal. Supabase Free remains selected.
