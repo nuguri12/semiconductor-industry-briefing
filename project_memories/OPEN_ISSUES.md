@@ -50,6 +50,13 @@
 
 ## ISSUE-011 — Cloud database integration pending
 
-- **Status:** Open (2026-11-26). User confirmed no Neon project yet.
+- **Status:** Open (2026-11-27). User chose Supabase Free and deferred connection configuration.
 - **Impact:** Schema/store/ledger code is prepared, but real migration, TLS, role grants, rollback and concurrent claims are unverified. No scheduled cloud sending.
-- **Next action:** Follow `docs/database-setup.md` with an isolated Neon database. Run the three integration checks and runtime permission checks; then plan SQLite history migration, fixed schedule windows and backup/restore.
+- **Next action:** Follow `docs/database-setup.md` with an isolated Supabase database. Run the five integration checks and runtime permission checks, then migrate SQLite history and verify backup/restore. Fixed-window scheduling and claim/replay are implemented; real database verification remains pending.
+
+## ISSUE-012 — Hosted scheduler verification pending
+
+- **Status:** Open (2026-11-27).
+- **Finding:** GitHub Actions dry-run workflow passes local actionlint. It has not been run on GitHub; scheduled jobs remain opt-in.
+- **Impact:** Local tests do not establish runner timing or detect entirely missing cron events. Workflow creation time only estimates the intended slot within a six-hour bound.
+- **Next action:** Run workflow_dispatch after publishing, inspect artifacts and timing, then enable dry-run scheduling and assess missed-run monitoring. Keep production sending disabled until database/history and operational checks pass.

@@ -39,7 +39,8 @@ Cloudflare로 이전할 경우에도 동일 예정 시각·검색 조건·구간
 
 ## 검증 결과
 
-- `python -m unittest discover -s tests`: 70개 중 65개 통과, 실제 PostgreSQL이 필요한 5개 보류.
+- `python -m unittest discover -s tests`: 리뷰 보완 후 74개 중 69개 통과, 실제 PostgreSQL이 필요한 5개 보류.
+- 리뷰 보완: `invalid_records`는 정상 빈 결과가 아닌 실패로 처리한다. 재실행 시작 시 기존 snapshot/preview/report만 제거하며, 같은 조회 구간·설정의 요청은 예정 분이 달라도 최초 저장 결과를 재사용한다. 출력 폴더는 실행 프로세스별로 분리하고 동시에 공유하지 않는다.
 - actionlint v1.7.12: `.github/workflows/briefing.yml` 검사 통과. 공식 release 체크섬을 확인한 도구는 Git 제외 `output/tools/`에만 저장.
 - 경계 시각, UTC/KST 변환, 지연 실행, 변조된 plan, 수신자별 고정 키, 중복 수집/발송 차단, unknown 재시도 차단, DB 선점/저장 실패 시 무발송, 미래 슬롯 거부, source 전체 실패 처리, Actions 입력 검증을 모의 환경에서 확인.
 - 실제 소스 dry-run: 11월 27일 06:20 KST경 수동으로 11월 26일 08:10 슬롯을 지정했다. GDELT HTTP 429, MSIT 정상 0건, MOTIR 정상 1건. DB/SMTP 호출 없이 미리보기 생성. 날짜 정밀도 항목이므로 정확한 08:00 이전 발행은 확인 불가. 증거: `output/scheduled-live-check/`.

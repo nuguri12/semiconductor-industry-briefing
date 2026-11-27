@@ -4,13 +4,14 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from .job import execute
+from .job import execute, clear_artifacts
 from .schedule import github_daily_slot, make_plan, timestamp
 
 
 def main():
     output = Path('output/scheduled')
     try:
+        clear_artifacts(output)
         event = os.environ.get('BRIEFING_EVENT')
         created_at = os.environ['BRIEFING_RUN_CREATED_AT']
         timestamp(created_at)

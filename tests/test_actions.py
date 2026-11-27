@@ -30,6 +30,13 @@ class ActionsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, env, clear=True), \
              patch('briefing.actions.Path', return_value=Path(folder)), patch('builtins.print'), \
              patch('briefing.actions.execute') as execute:
+            (Path(folder) / 'report.json').write_text(json.dumps(dict(run_key='old', articles=7)))
+            (Path(folder) / 'preview.txt').write_text('old')
+            (Path(folder) / 'snapshot.json').write_text('{}')
             self.assertEqual(main(), 1)
             execute.assert_not_called()
-            self.assertEqual(json.loads((Path(folder) / 'report.json').read_text())['status'], 'failed')
+            report = json.loads((Path(folder) / 'report.json').read_text())
+            self.assertEqual(report['status'], 'failed')
+            self.assertNotIn('run_key', report)
+            self.assertFalse((Path(folder) / 'preview.txt').exists())
+            self.assertFalse((Path(folder) / 'snapshot.json').exists())

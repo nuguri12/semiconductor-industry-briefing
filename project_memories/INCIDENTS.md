@@ -1,5 +1,13 @@
 # Incidents
 
+## 2026-11-27 — Scheduled job review corrections
+
+- Symptom: malformed records appeared as a successful empty run; failed reruns retained older previews; same-window requests with different scheduled minutes could not replay.
+- Root cause: empty-result handling ignored invalid_records, artifacts were only replaced on success, and replay compared the entire plan instead of its validated execution identity.
+- Fix: fail invalid_records before DB completion/delivery, clear only job-owned artifact files before input validation, and compare validated run keys while retaining saved content.
+- Verification: regression tests failed before the fixes and pass afterward. Full suite: 69 passed, 5 real-DB tests skipped; actionlint passed. No live DB or mail calls.
+- Prevention: exercise success-to-failure reruns and equivalent execution identities, not only exact request repeats. Keep concurrent processes in separate output directories.
+
 ## 2026-11-26 — Live-news test unblocked by official MOTIR RSS (ISSUE-004/010)
 
 - Symptom: GDELT failed and MSIT had no matching articles within 72h, blocking live receipt verification.

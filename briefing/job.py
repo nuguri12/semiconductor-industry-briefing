@@ -38,8 +38,15 @@ def collect_snapshot(plan, now):
     return read_snapshot(result)
 
 
+def clear_artifacts(output):
+    # Remove only files owned by this job; keep ledgers and unrelated user files.
+    for name in ('snapshot.json', 'preview.txt', 'report.json'):
+        (Path(output) / name).unlink(missing_ok=True)
+
+
 def execute(plan, output, *, store=None, send=False, recipient=None, sender=None, now=None,
             ledger_factory=None):
+    clear_artifacts(output)
     validate_plan(plan)
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None or timestamp(plan['scheduled_for']) > now:
@@ -59,7 +66,8 @@ def execute(plan, output, *, store=None, send=False, recipient=None, sender=None
         if replay:
             briefing_id, result, subject, body = replay
             read_snapshot(result)
-            if result.get('schedule') != plan or body != render(result):
+            saved_plan = validate_plan(result.get('schedule'))
+            if saved_plan['run_key'] != plan['run_key'] or body != render(result):
                 raise ValueError('Stored briefing does not match this scheduled plan')
         else:
             result = collect_snapshot(plan, now)
@@ -70,6 +78,8 @@ def execute(plan, output, *, store=None, send=False, recipient=None, sender=None
         if str(message['Subject']) != subject or validate_message(message):
             raise ValueError('Scheduled email validation failed')
         report.update(articles=len(result['articles']), sources=result['sources'], reused=bool(replay))
+        if result['status'] == 'invalid_records':
+            raise ValueError('No usable records after validation')
         if all(s == 'failed' for s in result['sources'].values()):
             raise ValueError('All news sources failed')
         if store and not replay:
@@ -113,6 +123,7 @@ def main():
     args = parser.parse_args()
     load_dotenv()
     try:
+        clear_artifacts(args.output)
         plan = make_plan(args.scheduled_for, args.query, args.hours, args.limit)
         store = PostgresStore(os.getenv('DATABASE_URL')) if args.store_db else None
         sender = None

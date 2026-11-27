@@ -85,6 +85,59 @@ class JobTests(unittest.TestCase):
                 self.assertEqual(result['status'], 'unknown')
             sender.assert_called_once()
 
+    def test_same_window_different_slot_reuses_original_without_resending(self):
+        store, sender = MemoryStore(), Mock(return_value=None)
+        later = make_plan('2026-11-27T08:20:00+09:00', 'chips')
+        with tempfile.TemporaryDirectory() as folder, patch('briefing.job.collect_sources', return_value=self.collected) as collect:
+            ledger = DeliveryLedger(Path(folder) / 'ledger.sqlite')
+            kwargs = dict(store=store, send=True, recipient='test@example.invalid', sender=sender,
+                          ledger_factory=lambda *_: ledger, now=self.now)
+            execute(self.plan, folder, **kwargs)
+            original = (Path(folder) / 'preview.txt').read_bytes()
+            report = execute(later, folder, **kwargs)
+            self.assertTrue(report['reused'])
+            self.assertEqual((Path(folder) / 'preview.txt').read_bytes(), original)
+            saved = json.loads((Path(folder) / 'snapshot.json').read_text(encoding='utf-8'))
+            self.assertEqual(saved['schedule'], self.plan)
+            collect.assert_called_once()
+            sender.assert_called_once()
+
+    def test_invalid_records_fail_without_saving_or_sending(self):
+        self.collected.update(articles=[], rejected=1)
+        store, sender, ledger = MemoryStore(), Mock(), Mock()
+        with tempfile.TemporaryDirectory() as folder, patch('briefing.job.collect_sources', return_value=self.collected):
+            with self.assertRaises(ValueError):
+                execute(self.plan, folder, store=store, send=True, recipient='test@example.invalid',
+                        sender=sender, ledger_factory=ledger, now=self.now)
+            self.assertEqual(json.loads((Path(folder) / 'report.json').read_text())['status'], 'failed')
+        self.assertEqual(store.state, 'failed')
+        self.assertIsNone(store.saved)
+        sender.assert_not_called()
+        ledger.assert_not_called()
+
+    def test_replay_still_rejects_different_query(self):
+        store, sender = MemoryStore(), Mock()
+        with tempfile.TemporaryDirectory() as folder, patch('briefing.job.collect_sources', return_value=self.collected):
+            execute(self.plan, folder, store=store, now=self.now)
+            different = make_plan('2026-11-27T08:10:00+09:00', 'robots')
+            with self.assertRaises(ValueError):
+                execute(different, folder, store=store, send=True, recipient='test@example.invalid',
+                        sender=sender, ledger_factory=Mock(), now=self.now)
+        sender.assert_not_called()
+
+    def test_failed_rerun_removes_only_previous_artifacts(self):
+        with tempfile.TemporaryDirectory() as folder, patch('briefing.job.collect_sources', return_value=self.collected):
+            execute(self.plan, folder, now=self.now)
+            keep = Path(folder) / 'keep.txt'
+            keep.write_text('keep')
+            self.collected.update(articles=[], sources={'GDELT': 'failed'})
+            with self.assertRaises(ValueError):
+                execute(self.plan, folder, now=self.now)
+            self.assertFalse((Path(folder) / 'snapshot.json').exists())
+            self.assertFalse((Path(folder) / 'preview.txt').exists())
+            self.assertEqual(keep.read_text(), 'keep')
+            self.assertEqual(json.loads((Path(folder) / 'report.json').read_text())['status'], 'failed')
+
     def test_db_claim_failure_blocks_collection_and_send(self):
         store, sender = Mock(), Mock()
         store.claim_schedule.side_effect = ValueError('db unavailable')

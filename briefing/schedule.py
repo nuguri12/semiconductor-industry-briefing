@@ -51,6 +51,7 @@ def validate_plan(plan):
 
 def github_daily_slot(run_created_at):
     """Infer the 08:10 KST slot only within a bounded delay; reruns use original created_at."""
+    # shortcut: creation time cannot detect missed days; add independent monitoring before unattended sending.
     created = timestamp(run_created_at).astimezone(KST)
     slot = created.replace(hour=8, minute=10, second=0)
     if slot > created:
